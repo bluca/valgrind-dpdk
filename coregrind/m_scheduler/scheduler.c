@@ -1890,6 +1890,15 @@ void do_client_request ( ThreadId tid )
                 (Addr)f );
          break;
       }
+      case VG_USERREQ__CLIENT_CALL5: {
+         UWord (*f)(ThreadId, UWord, UWord, UWord, UWord, UWord) = (void*)arg[1];
+     if (f == NULL)
+        VG_(message)(Vg_DebugMsg, "VG_USERREQ__CLIENT_CALL5: func=%p\n", f);
+     else
+        SET_CLCALL_RETVAL(tid, f ( tid, arg[2], arg[3], arg[4], arg[5],
+                arg[6] ), (Addr)f );
+         break;
+      }
 
       // Nb: this looks like a circular definition, because it kind of is.
       // See comment in valgrind.h to understand what's going on.
