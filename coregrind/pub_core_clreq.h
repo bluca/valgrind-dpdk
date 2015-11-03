@@ -80,7 +80,7 @@ static int VALGRIND_INTERNAL_PRINTF(const char *format, ...)
    va_start(vargs, format);
    VALGRIND_DO_CLIENT_REQUEST(
       _qzz_res, 0, VG_USERREQ__INTERNAL_PRINTF_VALIST_BY_REF,
-      (unsigned long)format, (unsigned long)&vargs, 0, 0, 0
+      (unsigned long)format, (unsigned long)&vargs, 0, 0, 0, 0
    );
    va_end(vargs);
    return _qzz_res;

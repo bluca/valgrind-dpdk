@@ -1317,7 +1317,7 @@ static void init(void)
    init_done = 1;
 
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__GET_MALLOCFUNCS, &info,
-                                   0, 0, 0, 0);
+                                   0, 0, 0, 0, 0);
 }
 
 /*--------------------------------------------------------------------*/

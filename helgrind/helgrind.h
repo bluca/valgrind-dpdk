@@ -167,7 +167,7 @@ typedef
       _arg1 = (long int)(_arg1F);                        \
       VALGRIND_DO_CLIENT_REQUEST_STMT(                   \
                                  (_creqF),               \
-                                 _arg1, 0,0,0,0);        \
+                                 _arg1, 0,0,0,0,0);      \
    } while (0)
 
 #define DO_CREQ_W_W(_resF, _dfltF, _creqF, _ty1F,_arg1F) \
@@ -178,7 +178,7 @@ typedef
       _qzz_res = VALGRIND_DO_CLIENT_REQUEST_EXPR(        \
                                  (_dfltF),               \
                                  (_creqF),               \
-                                 _arg1, 0,0,0,0);        \
+                                 _arg1, 0,0,0,0,0);      \
       _resF = _qzz_res;                                  \
    } while (0)
 
@@ -191,7 +191,7 @@ typedef
       _arg2 = (long int)(_arg2F);                        \
       VALGRIND_DO_CLIENT_REQUEST_STMT(                   \
                                  (_creqF),               \
-                                 _arg1,_arg2,0,0,0);     \
+                                 _arg1,_arg2,0,0,0,0);   \
    } while (0)
 
 #define DO_CREQ_v_WWW(_creqF, _ty1F,_arg1F,              \
@@ -206,7 +206,8 @@ typedef
       _arg3 = (long int)(_arg3F);                        \
       VALGRIND_DO_CLIENT_REQUEST_STMT(                   \
                                  (_creqF),               \
-                                 _arg1,_arg2,_arg3,0,0); \
+                                 _arg1,_arg2,_arg3,0,0,  \
+                                 0);                     \
    } while (0)
 
 #define DO_CREQ_W_WWW(_resF, _dfltF, _creqF, _ty1F,_arg1F, \
@@ -221,7 +222,8 @@ typedef
       _qzz_res = VALGRIND_DO_CLIENT_REQUEST_EXPR(        \
                                  (_dfltF),               \
                                  (_creqF),               \
-                                 _arg1,_arg2,_arg3,0,0); \
+                                 _arg1,_arg2,_arg3,0,0,  \
+                                 0);                     \
       _resF = _qzz_res;                                  \
    } while (0)
 

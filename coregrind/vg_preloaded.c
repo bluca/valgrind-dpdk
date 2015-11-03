@@ -79,7 +79,8 @@ void VG_NOTIFY_ON_LOAD(freeres)(Vg_FreeresToRun to_run)
 #  endif
 #  endif
 
-   VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__FREERES_DONE, 0, 0, 0, 0, 0);
+   VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__FREERES_DONE,
+                                   0, 0, 0, 0, 0, 0);
    /*NOTREACHED*/
    *(volatile int *)0 = 'x';
 }
@@ -119,7 +120,7 @@ void * VG_NOTIFY_ON_LOAD(ifunc_wrapper) (void)
        led to this function. This client request eventually gives control to
        the function VG_(redir_add_ifunc_target) in m_redir.c  */
     VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__ADD_IFUNC_TARGET,
-                                    fn.nraddr, fnentry, 0, 0, 0);
+                                    fn.nraddr, fnentry, 0, 0, 0, 0);
     return (void*)result;
 }
 

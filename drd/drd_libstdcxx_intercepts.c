@@ -72,15 +72,15 @@ int __cxa_guard_acquire_intercept(void *guard)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_LOCK,
-                                   guard, mutex_type_cxa_guard, 0, 0, 0);
+                                   guard, mutex_type_cxa_guard, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, guard);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_LOCK,
-                                   guard, 1, 0, 0, 0);
+                                   guard, 1, 0, 0, 0, 0);
    if (ret == 0) {
       VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_UNLOCK,
-                                      guard, mutex_type_cxa_guard, 0, 0, 0);
+                                      guard, mutex_type_cxa_guard, 0, 0, 0, 0);
       VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_UNLOCK,
-                                      guard, 0, 0, 0, 0);
+                                      guard, 0, 0, 0, 0, 0);
    }
    return ret;
 }
@@ -97,10 +97,10 @@ void __cxa_guard_abort_release_intercept(void *guard)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_UNLOCK,
-                                   guard, mutex_type_cxa_guard, 0, 0, 0);
+                                   guard, mutex_type_cxa_guard, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, guard);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_UNLOCK,
-                                   guard, 0, 0, 0, 0);
+                                   guard, 0, 0, 0, 0, 0);
 }
 
 LIBSTDCXX_FUNC(void, ZuZucxaZuguardZurelease,

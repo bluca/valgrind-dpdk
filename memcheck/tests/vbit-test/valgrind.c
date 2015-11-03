@@ -98,7 +98,7 @@ valgrind_get_vbits(opnd_t *opnd)
 void
 valgrind_vex_init_for_iri(IRICB *cb)
 {
-   VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__VEX_INIT_FOR_IRI, cb, 0,0,0,0);
+   VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__VEX_INIT_FOR_IRI, cb, 0,0,0,0,0);
 }
 
 

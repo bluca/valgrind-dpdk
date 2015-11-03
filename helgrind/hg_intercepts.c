@@ -120,7 +120,7 @@
       assert(sizeof(_ty1F) == sizeof(Word));             \
       _arg1 = (Word)(_arg1F);                            \
       VALGRIND_DO_CLIENT_REQUEST_STMT((_creqF),          \
-                                 _arg1, 0,0,0,0);        \
+                                 _arg1, 0,0,0,0,0);      \
    } while (0)
 
 #define DO_CREQ_v_WW(_creqF, _ty1F,_arg1F, _ty2F,_arg2F) \
@@ -131,7 +131,7 @@
       _arg1 = (Word)(_arg1F);                            \
       _arg2 = (Word)(_arg2F);                            \
       VALGRIND_DO_CLIENT_REQUEST_STMT((_creqF),          \
-                                 _arg1,_arg2,0,0,0);     \
+                                 _arg1,_arg2,0,0,0,0);   \
    } while (0)
 
 #define DO_CREQ_W_WW(_resF, _creqF, _ty1F,_arg1F,        \
@@ -144,7 +144,7 @@
       _arg2 = (Word)(_arg2F);                            \
       _res = VALGRIND_DO_CLIENT_REQUEST_EXPR(2,          \
                                  (_creqF),               \
-                                 _arg1,_arg2,0,0,0);     \
+                                 _arg1,_arg2,0,0,0,0);   \
       _resF = _res;                                      \
    } while (0)
 
@@ -159,7 +159,8 @@
       _arg2 = (Word)(_arg2F);                            \
       _arg3 = (Word)(_arg3F);                            \
       VALGRIND_DO_CLIENT_REQUEST_STMT((_creqF),          \
-                                 _arg1,_arg2,_arg3,0,0); \
+                                 _arg1,_arg2,_arg3,0,0,  \
+                                 0);                     \
    } while (0)
 
 #define DO_CREQ_v_WWWW(_creqF, _ty1F,_arg1F,             \
@@ -176,7 +177,8 @@
       _arg3 = (Word)(_arg3F);                            \
       _arg4 = (Word)(_arg4F);                            \
       VALGRIND_DO_CLIENT_REQUEST_STMT((_creqF),          \
-                             _arg1,_arg2,_arg3,_arg4,0); \
+                             _arg1,_arg2,_arg3,_arg4,0,  \
+                             0);                         \
    } while (0)
 
 #define DO_PthAPIerror(_fnnameF, _errF)                  \
@@ -311,7 +313,7 @@ static void hg_init(void)
 static int _ti_bind_guard_intercept_WRK(int flags)
 {
    VALGRIND_DO_CLIENT_REQUEST_STMT(_VG_USERREQ__HG_RTLD_BIND_GUARD,
-                                   flags, 0, 0, 0, 0);
+                                   flags, 0, 0, 0, 0, 0);
    return hg_rtld_bind_guard(flags);
 }
 
@@ -319,7 +321,7 @@ static int _ti_bind_clear_intercept_WRK(int flags)
 {
    int ret = hg_rtld_bind_clear(flags);
    VALGRIND_DO_CLIENT_REQUEST_STMT(_VG_USERREQ__HG_RTLD_BIND_CLEAR,
-                                   flags, 0, 0, 0, 0);
+                                   flags, 0, 0, 0, 0, 0);
    return ret;
 }
 
@@ -423,10 +425,10 @@ static int pthread_create_WRK(pthread_t *thread, const pthread_attr_t *attr,
    VALGRIND_HG_DISABLE_CHECKING(&xargs, sizeof(xargs));
 
    VALGRIND_DO_CLIENT_REQUEST_STMT(_VG_USERREQ__HG_PTHREAD_CREATE_BEGIN,
-                                   0, 0, 0, 0, 0);
+                                   0, 0, 0, 0, 0, 0);
    CALL_FN_W_WWWW(ret, fn, thread,attr,mythread_wrapper,&xargs[0]);
    VALGRIND_DO_CLIENT_REQUEST_STMT(_VG_USERREQ__HG_PTHREAD_CREATE_END,
-                                   0, 0, 0, 0, 0);
+                                   0, 0, 0, 0, 0, 0);
 
    if (ret == 0) {
       /* we have to wait for the child to notify the tool of its
@@ -505,11 +507,11 @@ static int thr_create_WRK(void *stk, size_t stksize, void *(*start)(void *),
    VALGRIND_HG_DISABLE_CHECKING(&xargs, sizeof(xargs));
 
    VALGRIND_DO_CLIENT_REQUEST_STMT(_VG_USERREQ__HG_PTHREAD_CREATE_BEGIN,
-                                   0, 0, 0, 0, 0);
+                                   0, 0, 0, 0, 0, 0);
    CALL_FN_W_6W(ret, fn, stk, stksize, mythread_wrapper, start, flags,
                 new_thread);
    VALGRIND_DO_CLIENT_REQUEST_STMT(_VG_USERREQ__HG_PTHREAD_CREATE_END,
-                                   0, 0, 0, 0, 0);
+                                   0, 0, 0, 0, 0, 0);
 
    if (ret == 0) {
       while (xargs[2] != 0) {

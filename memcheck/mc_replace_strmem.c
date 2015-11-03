@@ -43,6 +43,6 @@
 #define RECORD_OVERLAP_ERROR(s, src, dst, len)                  \
   VALGRIND_DO_CLIENT_REQUEST_STMT(                              \
                   _VG_USERREQ__MEMCHECK_RECORD_OVERLAP_ERROR,   \
-                  s, src, dst, len, 0)
+                  s, src, dst, len, 0, 0)
 
 #include "../shared/vg_replace_strmem.c"
