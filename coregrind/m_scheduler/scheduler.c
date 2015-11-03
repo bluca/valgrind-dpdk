@@ -2005,6 +2005,14 @@ void do_client_request ( ThreadId tid )
 	 info->tl___builtin_delete     = VG_(tdict).tool___builtin_delete;
 	 info->tl___builtin_vec_delete = VG_(tdict).tool___builtin_vec_delete;
          info->tl_malloc_usable_size   = VG_(tdict).tool_malloc_usable_size;
+	 info->tl_rte_malloc           = VG_(tdict).tool_rte_malloc;
+	 info->tl_rte_calloc           = VG_(tdict).tool_rte_calloc;
+	 info->tl_rte_zmalloc          = VG_(tdict).tool_rte_zmalloc;
+	 info->tl_rte_realloc          = VG_(tdict).tool_rte_realloc;
+	 info->tl_rte_malloc_socket    = VG_(tdict).tool_rte_malloc_socket;
+	 info->tl_rte_calloc_socket    = VG_(tdict).tool_rte_calloc_socket;
+	 info->tl_rte_zmalloc_socket   = VG_(tdict).tool_rte_zmalloc_socket;
+	 info->tl_rte_free             = VG_(tdict).tool_rte_free;
 
 	 info->mallinfo                = VG_(mallinfo);
 	 info->clo_trace_malloc        = VG_(clo_trace_malloc);

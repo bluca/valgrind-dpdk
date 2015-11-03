@@ -670,6 +670,97 @@ void MC_(handle_resizeInPlace)(ThreadId tid, Addr p,
    }
 }
 
+void* MC_(rte_malloc) ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   if (MC_(record_fishy_value_error)(tid, "rte_malloc", "size", n)) {
+      return NULL;
+   } else {
+      /* Round up to minimum alignment if necessary. */
+      if (align < VG_(clo_alignment))
+          align = VG_(clo_alignment);
+      /* Round up to nearest power-of-two if necessary (like glibc). */
+      while (0 != (align & (align - 1))) align++;
+
+      return MC_(new_block) ( tid, 0, n, align,
+         /*is_zeroed*/False, MC_AllocMalloc, MC_(malloc_list));
+   }
+}
+
+void* MC_(rte_calloc) ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align )
+{
+   if (MC_(record_fishy_value_error)(tid, "rte_calloc", "nmemb", nmemb) ||
+       MC_(record_fishy_value_error)(tid, "rte_calloc", "size", size1)) {
+      return NULL;
+   } else {
+      /* Round up to minimum alignment if necessary. */
+      if (align < VG_(clo_alignment))
+          align = VG_(clo_alignment);
+      /* Round up to nearest power-of-two if necessary (like glibc). */
+      while (0 != (align & (align - 1))) align++;
+
+      return MC_(new_block) ( tid, 0, nmemb*size1, align,
+         /*is_zeroed*/True, MC_AllocMalloc, MC_(malloc_list));
+   }
+}
+
+void* MC_(rte_zmalloc) ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   if (MC_(record_fishy_value_error)(tid, "rte_zmalloc", "size", n)) {
+      return NULL;
+   } else {
+      /* Round up to minimum alignment if necessary. */
+      if (align < VG_(clo_alignment))
+          align = VG_(clo_alignment);
+      /* Round up to nearest power-of-two if necessary (like glibc). */
+      while (0 != (align & (align - 1))) align++;
+
+      return MC_(new_block) ( tid, 0, n, align,
+         /*is_zeroed*/True, MC_AllocMalloc, MC_(malloc_list));
+   }
+}
+
+void* MC_(rte_realloc) ( ThreadId tid, void* p_old, SizeT new_szB,
+        unsigned align )
+{
+   if (MC_(record_fishy_value_error)(tid, "realloc", "size", new_szB)) {
+      return NULL;
+   } else {
+      /* Round up to minimum alignment if necessary. */
+      if (align < VG_(clo_alignment))
+          align = VG_(clo_alignment);
+      /* Round up to nearest power-of-two if necessary (like glibc). */
+      while (0 != (align & (align - 1))) align++;
+
+      return renew_block ( tid, p_old, new_szB, align );
+   }
+}
+
+void* MC_(rte_malloc_socket) ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return MC_(rte_malloc) ( tid, "", n, align );
+}
+
+void* MC_(rte_calloc_socket) ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align, int socket )
+{
+   return MC_(rte_calloc) ( tid, "", nmemb, size1, align );
+}
+
+void* MC_(rte_zmalloc_socket) ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return MC_(rte_zmalloc) ( tid, "", n, align );
+}
+
+void MC_(rte_free) ( ThreadId tid, void* p )
+{
+   MC_(free) ( tid, p );
+}
+
 
 /*------------------------------------------------------------*/
 /*--- Memory pool stuff.                                   ---*/

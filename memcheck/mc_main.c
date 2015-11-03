@@ -7763,6 +7763,14 @@ static void mc_pre_clo_init(void)
                                    MC_(__builtin_vec_delete),
                                    MC_(realloc),
                                    MC_(malloc_usable_size), 
+                                   MC_(rte_malloc),
+                                   MC_(rte_calloc),
+                                   MC_(rte_zmalloc),
+                                   MC_(rte_realloc),
+                                   MC_(rte_malloc_socket),
+                                   MC_(rte_calloc_socket),
+                                   MC_(rte_zmalloc_socket),
+                                   MC_(rte_free),
                                    MC_MALLOC_DEFAULT_REDZONE_SZB );
    MC_(Malloc_Redzone_SzB) = VG_(malloc_effective_client_redzone_size)();
 

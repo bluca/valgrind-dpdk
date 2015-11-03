@@ -345,6 +345,10 @@
 #define VG_SO_SYN_PREFIX     "VgSoSyn"
 #define VG_SO_SYN_PREFIX_LEN 7
 
+// Prefixes for Intel DPDK libraries, first wildcard matches architecture
+#define VG_Z_DPDK_SONAME  libZadpdkZdsoZa     // lib*dpdk.so*
+#define VG_Z_RTE_SONAME   librteZumallocZdsoZa  // librte_malloc.so*
+
 #endif   // __PUB_TOOL_REDIR_H
 
 /*--------------------------------------------------------------------*/

@@ -66,6 +66,21 @@ void  h_replace___builtin_delete ( ThreadId tid, void* p );
 void  h_replace___builtin_vec_delete ( ThreadId tid, void* p );
 void* h_replace_realloc ( ThreadId tid, void* p_old, SizeT new_size );
 SizeT h_replace_malloc_usable_size ( ThreadId tid, void* p );
+void* h_replace_rte_malloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align );
+void* h_replace_rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align );
+void* h_replace_rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align );
+void* h_replace_rte_realloc ( ThreadId tid, void* p, SizeT new_size,
+        unsigned align );
+void* h_replace_rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket );
+void* h_replace_rte_calloc_socket ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align, int socket );
+void* h_replace_rte_zmalloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket );
+void  h_replace_rte_free ( ThreadId tid, void* p );
 
 /* Note that this also does the sg_ instrumentation. */
 IRSB* h_instrument ( VgCallbackClosure* closure,

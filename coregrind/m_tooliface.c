@@ -339,6 +339,21 @@ void VG_(needs_malloc_replacement)(
    void  (*__builtin_vec_delete) ( ThreadId, void* ),
    void* (*realloc)              ( ThreadId, void*, SizeT ),
    SizeT (*malloc_usable_size)   ( ThreadId, void* ), 
+   void* (*rte_malloc)           ( ThreadId tid, const char *type, SizeT n,
+           unsigned align ),
+   void* (*rte_calloc)           ( ThreadId tid, const char *type, SizeT nmemb,
+           SizeT size1, unsigned align ),
+   void* (*rte_zmalloc)          ( ThreadId tid, const char *type, SizeT n,
+           unsigned align ),
+   void* (*rte_realloc)          ( ThreadId tid, void* p, SizeT new_size,
+           unsigned align ),
+   void* (*rte_malloc_socket)    ( ThreadId tid, const char *type, SizeT n,
+           unsigned align, int socket ),
+   void* (*rte_calloc_socket)    ( ThreadId tid, const char *type, SizeT nmemb,
+           SizeT size1, unsigned align, int socket ),
+   void* (*rte_zmalloc_socket)   ( ThreadId tid, const char *type, SizeT n,
+           unsigned align, int socket ),
+   void  (*rte_free)             ( ThreadId tid, void* p ),
    SizeT client_malloc_redzone_szB
 )
 {
@@ -353,6 +368,14 @@ void VG_(needs_malloc_replacement)(
    VG_(tdict).tool___builtin_vec_delete = __builtin_vec_delete;
    VG_(tdict).tool_realloc              = realloc;
    VG_(tdict).tool_malloc_usable_size   = malloc_usable_size;
+   VG_(tdict).tool_rte_malloc           = rte_malloc;
+   VG_(tdict).tool_rte_calloc           = rte_calloc;
+   VG_(tdict).tool_rte_zmalloc          = rte_zmalloc;
+   VG_(tdict).tool_rte_realloc          = rte_realloc;
+   VG_(tdict).tool_rte_malloc_socket    = rte_malloc_socket;
+   VG_(tdict).tool_rte_calloc_socket    = rte_calloc_socket;
+   VG_(tdict).tool_rte_zmalloc_socket   = rte_zmalloc_socket;
+   VG_(tdict).tool_rte_free             = rte_free;
    VG_(tdict).tool_client_redzone_szB   = client_malloc_redzone_szB;
 }
 

@@ -463,6 +463,77 @@ SizeT h_replace_malloc_usable_size ( ThreadId tid, void* p )
    return ( seg ? seg->szB : 0 );
 }
 
+void* h_replace_rte_malloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return alloc_and_new_mem_heap ( tid, n, align, /*is_zeroed*/False );
+}
+
+void* h_replace_rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return alloc_and_new_mem_heap ( tid, nmemb*size1, align, /*is_zeroed*/True );
+}
+
+void* h_replace_rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return alloc_and_new_mem_heap ( tid, n, align, /*is_zeroed*/True );
+}
+
+void* h_replace_rte_realloc ( ThreadId tid, void* p_old, SizeT new_szB,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return renew_block(tid, p_old, new_szB, align);
+}
+
+void* h_replace_rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return h_replace_rte_malloc ( tid, type, n, align );
+}
+
+void* h_replace_rte_calloc_socket ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align, int socket )
+{
+   return h_replace_rte_calloc ( tid, type, nmemb, size1, align );
+}
+
+void* h_replace_rte_zmalloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return h_replace_rte_zmalloc ( tid, type, n, align );
+}
+
+void h_replace_rte_free ( ThreadId tid, void* p )
+{
+   h_replace_free ( tid, p );
+}
+
 
 /*--------------------------------------------------------------------*/
 /*--- Instrumentation                                              ---*/
