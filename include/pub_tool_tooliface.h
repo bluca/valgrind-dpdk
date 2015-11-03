@@ -484,6 +484,21 @@ extern void VG_(needs_malloc_replacement)(
    void  (*p__builtin_vec_delete) ( ThreadId tid, void* p ),
    void* (*prealloc)              ( ThreadId tid, void* p, SizeT new_size ),
    SizeT (*pmalloc_usable_size)   ( ThreadId tid, void* p), 
+   void* (*prte_malloc)           ( ThreadId tid, const char *type, SizeT n,
+           unsigned align ),
+   void* (*prte_calloc)           ( ThreadId tid, const char *type, SizeT nmemb,
+           SizeT size1, unsigned align ),
+   void* (*prte_zmalloc)          ( ThreadId tid, const char *type, SizeT n,
+           unsigned align ),
+   void* (*prte_realloc)          ( ThreadId tid, void* p, SizeT new_size,
+           unsigned align ),
+   void* (*prte_malloc_socket)    ( ThreadId tid, const char *type, SizeT n,
+           unsigned align, int socket ),
+   void* (*prte_calloc_socket)    ( ThreadId tid, const char *type, SizeT nmemb,
+           SizeT size1, unsigned align, int socket ),
+   void* (*prte_zmalloc_socket)   ( ThreadId tid, const char *type, SizeT n,
+           unsigned align, int socket ),
+   void  (*prte_free)             ( ThreadId tid, void* p ),
    SizeT client_malloc_redzone_szB
 );
 

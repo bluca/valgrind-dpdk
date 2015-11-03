@@ -161,6 +161,22 @@ void  MC_(__builtin_vec_delete) ( ThreadId tid, void* p );
 void* MC_(realloc)              ( ThreadId tid, void* p, SizeT new_size );
 SizeT MC_(malloc_usable_size)   ( ThreadId tid, void* p );
 
+void* MC_(rte_malloc)           ( ThreadId tid, const char *type, SizeT n,
+        unsigned align );
+void* MC_(rte_calloc)           ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align );
+void* MC_(rte_zmalloc)          ( ThreadId tid, const char *type, SizeT n,
+        unsigned align );
+void* MC_(rte_realloc)          ( ThreadId tid, void* p, SizeT new_size,
+        unsigned align );
+void* MC_(rte_malloc_socket)    ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket );
+void* MC_(rte_calloc_socket)    ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align, int socket );
+void* MC_(rte_zmalloc_socket)   ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket );
+void  MC_(rte_free)             ( ThreadId tid, void* p );
+
 void MC_(handle_resizeInPlace)(ThreadId tid, Addr p,
                                SizeT oldSizeB, SizeT newSizeB, SizeT rzB);
 

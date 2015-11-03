@@ -2670,6 +2670,115 @@ void* VG_(perm_malloc) ( SizeT size, Int align  )
    return VG_(arena_perm_malloc) ( VG_AR_CORE, size, align );
 }
 
+void* VG_(rte_malloc) ( const HChar* cc, const char *type, SizeT nbytes,
+        unsigned align )
+{
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return VG_(arena_memalign) ( VG_AR_CORE, cc, align, nbytes );
+}
+
+void* VG_(rte_calloc) ( const HChar* cc, const char *type, SizeT nmemb,
+        SizeT bytes_per_memb, unsigned align )
+{
+   SizeT  size;
+   void*  p;
+
+   size = nmemb * bytes_per_memb;
+   vg_assert(size >= nmemb && size >= bytes_per_memb);// check against overflow
+
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   p = VG_(arena_memalign) ( VG_AR_CORE, cc, align, size );
+
+   if (p != NULL)
+     VG_(memset)(p, 0, size);
+
+   return p;
+}
+
+void* VG_(rte_zmalloc) ( const HChar* cc, const char *type, SizeT n,
+        unsigned align )
+{
+   void*  p;
+
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   p = VG_(arena_memalign) ( VG_AR_CORE, cc, align, n );
+
+   if (p != NULL)
+     VG_(memset)(p, 0, n);
+
+   return p;
+}
+
+void* VG_(rte_realloc) ( const HChar* cc, void* ptr, SizeT size,
+        unsigned align )
+{
+   Arena* a;
+   SizeT  old_pszB;
+   void*  p_new;
+   Block* b;
+
+   ensure_mm_init(VG_AR_CORE);
+   a = arenaId_to_ArenaP(VG_AR_CORE);
+
+   vg_assert(size < MAX_PSZB);
+
+   if (NULL == ptr) {
+      return VG_(arena_memalign)(VG_AR_CORE, cc, align, size);
+   }
+
+   if (size == 0) {
+      VG_(arena_free)(VG_AR_CORE, ptr);
+      return NULL;
+   }
+
+   b = get_payload_block(a, ptr);
+   vg_assert(blockSane(a, b));
+
+   vg_assert(is_inuse_block(b));
+   old_pszB = get_pszB(a, b);
+
+   if (size <= old_pszB) {
+      return ptr;
+   }
+
+   p_new = VG_(arena_memalign) ( VG_AR_CORE, cc, align, size );
+
+   VG_(memcpy)(p_new, ptr, old_pszB);
+
+   VG_(arena_free)(VG_AR_CORE, ptr);
+
+   return p_new;
+}
+
+void* VG_(rte_malloc_socket) ( const HChar* cc, const char *type, SizeT nbytes,
+        unsigned align, int socket )
+{
+   return VG_(rte_malloc) ( cc, type, nbytes, align );
+}
+
+void* VG_(rte_calloc_socket) ( const HChar* cc, const char *type, SizeT nmemb,
+        SizeT bytes_per_memb, unsigned align, int socket )
+{
+   return VG_(rte_calloc) ( cc, type, nmemb, bytes_per_memb, align );
+}
+
+void* VG_(rte_zmalloc_socket) ( const HChar* cc, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return VG_(rte_zmalloc) ( cc, type, n, align );
+}
+
+void VG_(rte_free) ( void* ptr )
+{
+   VG_(arena_free) ( VG_AR_CORE, ptr );
+}
+
 
 /*--------------------------------------------------------------------*/
 /*--- end                                                          ---*/

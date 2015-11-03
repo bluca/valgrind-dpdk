@@ -45,6 +45,21 @@ extern void* VG_(calloc)         ( const HChar* cc, SizeT n, SizeT bytes_per_ele
 extern void*  VG_(realloc)       ( const HChar* cc, void* p, SizeT size );
 extern void   VG_(realloc_shrink)( void* ptr, SizeT size );
 extern HChar* VG_(strdup)        ( const HChar* cc, const HChar* s );
+extern void* VG_(rte_malloc)     ( const HChar* cc, const char *type,
+        SizeT nbytes, unsigned align );
+extern void* VG_(rte_calloc)     ( const HChar* cc, const char *type,
+        SizeT nmemb, SizeT bytes_per_memb, unsigned align );
+extern void* VG_(rte_zmalloc)    ( const HChar* cc, const char *type, SizeT n,
+        unsigned align );
+extern void* VG_(rte_realloc)    ( const HChar* cc, void* ptr, SizeT size,
+        unsigned align );
+extern void* VG_(rte_malloc_socket) ( const HChar* cc, const char *type,
+        SizeT nbytes, unsigned align, int socket );
+extern void* VG_(rte_calloc_socket) ( const HChar* cc, const char *type,
+        SizeT nmemb, SizeT bytes_per_memb, unsigned align, int socket );
+extern void* VG_(rte_zmalloc_socket) ( const HChar* cc, const char *type,
+        SizeT n, unsigned align, int socket );
+extern void VG_(rte_free)        ( void* ptr );
 
 // TODO: move somewhere else
 // Call here to bomb the system when out of memory (mmap anon fails)

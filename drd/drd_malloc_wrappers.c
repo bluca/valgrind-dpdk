@@ -294,6 +294,77 @@ static SizeT drd_malloc_usable_size(ThreadId tid, void* p)
    return mc ? mc->size : 0;
 }
 
+static void* drd_rte_malloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return new_block(tid, n, align, /*is_zeroed*/False);
+}
+
+static void* drd_rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return new_block(tid, nmemb*size1, align, /*is_zeroed*/True);
+}
+
+static void* drd_rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return new_block(tid, n, align, /*is_zeroed*/True);
+}
+
+static void* drd_rte_realloc ( ThreadId tid, void* p_old, SizeT new_szB,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return renew_block(tid, p_old, new_szB, align);
+}
+
+static void* drd_rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return drd_rte_malloc ( tid, type, n, align );
+}
+
+static void* drd_rte_calloc_socket ( ThreadId tid, const char *type,
+        SizeT nmemb, SizeT size1, unsigned align, int socket )
+{
+   return drd_rte_calloc ( tid, type, nmemb, size1, align );
+}
+
+static void* drd_rte_zmalloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return drd_rte_zmalloc ( tid, type, n, align );
+}
+
+static void drd_rte_free ( ThreadId tid, void* p )
+{
+   drd_free ( tid, p );
+}
+
 void DRD_(register_malloc_wrappers)(const StartUsingMem start_callback,
                                     const StopUsingMem stop_callback)
 {
@@ -315,6 +386,14 @@ void DRD_(register_malloc_wrappers)(const StartUsingMem start_callback,
                                  drd___builtin_vec_delete,
                                  drd_realloc,
                                  drd_malloc_usable_size,
+                                 drd_rte_malloc,
+                                 drd_rte_calloc,
+                                 drd_rte_zmalloc,
+                                 drd_rte_realloc,
+                                 drd_rte_malloc_socket,
+                                 drd_rte_calloc_socket,
+                                 drd_rte_zmalloc_socket,
+                                 drd_rte_free,
                                  0);
 }
 

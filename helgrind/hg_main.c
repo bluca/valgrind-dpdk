@@ -4398,6 +4398,85 @@ Bool HG_(mm_find_containing_block)( /*OUT*/ExeContext** where,
    return True;
 }
 
+static void* hg_cli__rte_malloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   if (((SSizeT)n) < 0) return NULL;
+
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return handle_alloc ( tid, n, align, /*is_zeroed*/False );
+}
+
+static void* hg_cli__rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align )
+{
+   if ( ((SSizeT)nmemb) < 0 || ((SSizeT)size1) < 0 ) return NULL;
+
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return handle_alloc ( tid, nmemb*size1, align, /*is_zeroed*/True );
+}
+
+static void* hg_cli__rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   if (((SSizeT)n) < 0) return NULL;
+
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return handle_alloc ( tid, n, align, /*is_zeroed*/True );
+}
+
+static void* hg_cli__rte_realloc ( ThreadId tid, void* p_old, SizeT new_szB,
+        unsigned align )
+{
+   if (((SSizeT)new_szB) < 0) return NULL;
+
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return handle_realloc ( tid, p_old, new_szB, align );
+}
+
+static void* hg_cli__rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return hg_cli__rte_malloc ( tid, type, n, align );
+}
+
+static void* hg_cli__rte_calloc_socket ( ThreadId tid, const char *type,
+        SizeT nmemb, SizeT size1, unsigned align, int socket )
+{
+   return hg_cli__rte_calloc ( tid, type, nmemb, size1, align );
+}
+
+static void* hg_cli__rte_zmalloc_socket ( ThreadId tid, const char *type,
+        SizeT n, unsigned align, int socket )
+{
+   return hg_cli__rte_zmalloc ( tid, type, n, align );
+}
+
+static void hg_cli__rte_free ( ThreadId tid, void* p )
+{
+   hg_cli__free ( tid, p );
+}
+
 
 /*--------------------------------------------------------------*/
 /*--- Instrumentation                                        ---*/
@@ -5880,6 +5959,14 @@ static void hg_pre_clo_init ( void )
                                    hg_cli____builtin_vec_delete,
                                    hg_cli__realloc,
                                    hg_cli_malloc_usable_size,
+                                   hg_cli__rte_malloc,
+                                   hg_cli__rte_calloc,
+                                   hg_cli__rte_zmalloc,
+                                   hg_cli__rte_realloc,
+                                   hg_cli__rte_malloc_socket,
+                                   hg_cli__rte_calloc_socket,
+                                   hg_cli__rte_zmalloc_socket,
+                                   hg_cli__rte_free,
                                    HG_CLI__DEFAULT_MALLOC_REDZONE_SZB );
 
    /* 21 Dec 08: disabled this; it mostly causes H to start more

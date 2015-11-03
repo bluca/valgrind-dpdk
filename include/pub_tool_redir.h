@@ -362,6 +362,11 @@
 
 Bool VG_(is_soname_ld_so) (const HChar *soname);
 
+// Prefixes for Intel DPDK libraries, first wildcard matches architecture
+#define VG_Z_DPDK_SONAME  libZadpdkZdsoZa     // lib*dpdk.so*
+#define VG_Z_RTE_SONAME   librteZumallocZdsoZa  // librte_malloc.so*
+#define VG_Z_RTE_EAL_SONAME   librteZuealZdsoZa  // librte_eal.so*
+
 #endif   // __PUB_TOOL_REDIR_H
 
 /*--------------------------------------------------------------------*/

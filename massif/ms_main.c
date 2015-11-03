@@ -1421,6 +1421,77 @@ static SizeT ms_malloc_usable_size ( ThreadId tid, void* p )
    return ( hc ? hc->req_szB + hc->slop_szB : 0 );
 }                                                            
 
+static void* ms_rte_malloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return alloc_and_record_block( tid, n, align, /*is_zeroed*/False );
+}
+
+static void* ms_rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return alloc_and_record_block( tid, nmemb*size1, align, /*is_zeroed*/True );
+}
+
+static void* ms_rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return alloc_and_record_block( tid, n, align, /*is_zeroed*/True );
+}
+
+static void* ms_rte_realloc ( ThreadId tid, void* p_old, SizeT new_szB,
+        unsigned align )
+{
+   /* Round up to minimum alignment if necessary. */
+   if (align < VG_(clo_alignment))
+       align = VG_(clo_alignment);
+   /* Round up to nearest power-of-two if necessary (like glibc). */
+   while (0 != (align & (align - 1))) align++;
+
+   return realloc_block(tid, p_old, new_szB, align);
+}
+
+static void* ms_rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+   return ms_rte_malloc ( tid, type, n, align );
+}
+
+static void* ms_rte_calloc_socket ( ThreadId tid, const char *type, SizeT nmemb,
+        SizeT size1, unsigned align, int socket )
+{
+   return ms_rte_calloc ( tid, type, nmemb, size1, align );
+}
+
+static void* ms_rte_zmalloc_socket ( ThreadId tid, const char *type, SizeT n,
+        unsigned align, int socket )
+{
+    return ms_rte_zmalloc ( tid, type, n, align );
+}
+
+static void ms_rte_free ( ThreadId tid, void* p )
+{
+   ms_free ( tid, p );
+}
+
 //------------------------------------------------------------//
 //--- Page handling                                        ---//
 //------------------------------------------------------------//
@@ -2101,6 +2172,14 @@ static void ms_pre_clo_init(void)
                                    ms___builtin_vec_delete,
                                    ms_realloc,
                                    ms_malloc_usable_size,
+                                   ms_rte_malloc,
+                                   ms_rte_calloc,
+                                   ms_rte_zmalloc,
+                                   ms_rte_realloc,
+                                   ms_rte_malloc_socket,
+                                   ms_rte_calloc_socket,
+                                   ms_rte_zmalloc_socket,
+                                   ms_rte_free,
                                    0 );
 
    // HP_Chunks.
