@@ -6195,7 +6195,8 @@ typedef
           VG_USERREQ__VEX_INIT_FOR_IRI = 0x1901,
           /* Used by Inner Valgrind to inform Outer Valgrind where to
              find the list of inner guest threads */
-          VG_USERREQ__INNER_THREADS    = 0x1902
+          VG_USERREQ__INNER_THREADS    = 0x1902,
+          VG_USERREQ__CLIENT_CALL4     = 0x1105
    } Vg_ClientRequest;
 
 #if !defined(__GNUC__)
@@ -6359,6 +6360,14 @@ VALGRIND_PRINTF_BACKTRACE(const char *format, ...)
                                     _qyy_fn,                            \
                                     _qyy_arg1, _qyy_arg2,               \
                                     _qyy_arg3, 0)
+
+#define VALGRIND_NON_SIMD_CALL4(_qyy_fn, _qyy_arg1, _qyy_arg2, _qyy_arg3, \
+        _qyy_arg4) \
+    VALGRIND_DO_CLIENT_REQUEST_EXPR(0 /* default return */,             \
+                                    VG_USERREQ__CLIENT_CALL4,           \
+                                    _qyy_fn,                            \
+                                    _qyy_arg1, _qyy_arg2,               \
+                                    _qyy_arg3, _qyy_arg4)
 
 
 /* Counts the number of errors that have been recorded by a tool.  Nb:
