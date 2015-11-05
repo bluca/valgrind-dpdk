@@ -4245,7 +4245,8 @@ static void hg_cli____builtin_vec_delete ( ThreadId tid, void* p ) {
 }
 
 
-static void* hg_cli__realloc ( ThreadId tid, void* payloadV, SizeT new_size )
+static void* handle_realloc ( ThreadId tid, void* payloadV, SizeT new_size,
+        SizeT alignB )
 {
    MallocMeta *md, *md_new, *md_tmp;
    SizeT      i;
@@ -4276,7 +4277,7 @@ static void* hg_cli__realloc ( ThreadId tid, void* payloadV, SizeT new_size )
 
    /* else */ {
       /* new size is bigger */
-      Addr p_new = (Addr)VG_(cli_malloc)(VG_(clo_alignment), new_size);
+      Addr p_new = (Addr)VG_(cli_malloc)(alignB, new_size);
 
       /* First half kept and copied, second half new */
       // FIXME: shouldn't we use a copier which implements the
@@ -4319,6 +4320,11 @@ static void* hg_cli__realloc ( ThreadId tid, void* payloadV, SizeT new_size )
 
       return (void*)p_new;
    }  
+}
+
+static void* hg_cli__realloc ( ThreadId tid, void* payloadV, SizeT new_size )
+{
+   return handle_realloc ( tid, payloadV, new_size, VG_(clo_alignment) );
 }
 
 static SizeT hg_cli_malloc_usable_size ( ThreadId tid, void* p )
