@@ -1242,7 +1242,8 @@ void unrecord_block ( void* p, Bool maybe_snapshot, Bool exclude_first_entry )
 // stats). Then everything would be fine, and a non ignored realloc would be
 // counted properly.
 static __inline__
-void* realloc_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
+void* realloc_block ( ThreadId tid, void* p_old, SizeT new_req_szB,
+        SizeT req_alignB )
 {
    HP_Chunk* hc;
    void*     p_new;
@@ -1286,7 +1287,7 @@ void* realloc_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
 
    } else {
       // New size is bigger;  make new block, copy shared contents, free old.
-      p_new = VG_(cli_malloc)(VG_(clo_alignment), new_req_szB);
+      p_new = VG_(cli_malloc)(req_alignB, new_req_szB);
       if (!p_new) {
          // Nb: if realloc fails, NULL is returned but the old block is not
          // touched.  What an awful function.
@@ -1410,7 +1411,7 @@ static void ms___builtin_vec_delete ( ThreadId tid, void* p )
 
 static void* ms_realloc ( ThreadId tid, void* p_old, SizeT new_szB )
 {
-   return realloc_block(tid, p_old, new_szB);
+   return realloc_block(tid, p_old, new_szB, VG_(clo_alignment));
 }
 
 static SizeT ms_malloc_usable_size ( ThreadId tid, void* p )
