@@ -535,7 +535,7 @@ void die_block ( void* p, Bool custom_free )
 
 
 static
-void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
+void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB, SizeT align )
 {
    if (0) VG_(printf)("REALL %p %lu\n", p_old, new_req_szB);
    void* p_new = NULL;
@@ -576,7 +576,7 @@ void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
    } else {
 
       // New size is bigger;  make new block, copy shared contents, free old.
-      p_new = VG_(cli_malloc)(VG_(clo_alignment), new_req_szB);
+      p_new = VG_(cli_malloc)(align, new_req_szB);
       if (!p_new) {
          // Nb: if realloc fails, NULL is returned but the old block is not
          // touched.  What an awful function.
@@ -666,7 +666,7 @@ static void* dh_realloc ( ThreadId tid, void* p_old, SizeT new_szB )
       dh_free(tid, p_old);
       return NULL;
    }
-   return renew_block(tid, p_old, new_szB);
+   return renew_block(tid, p_old, new_szB, VG_(clo_alignment));
 }
 
 static SizeT dh_malloc_usable_size ( ThreadId tid, void* p )
