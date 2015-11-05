@@ -531,15 +531,13 @@ void MC_(__builtin_vec_delete) ( ThreadId tid, void* p )
       tid, (Addr)p, MC_(Malloc_Redzone_SzB), MC_AllocNewVec);
 }
 
-void* MC_(realloc) ( ThreadId tid, void* p_old, SizeT new_szB )
+static
+void* renew_block ( ThreadId tid, void* p_old, SizeT new_szB, SizeT alignB )
 {
    MC_Chunk* old_mc;
    MC_Chunk* new_mc;
    Addr      a_new; 
    SizeT     old_szB;
-
-   if (MC_(record_fishy_value_error)(tid, "realloc", "size", new_szB))
-      return NULL;
 
    cmalloc_n_frees ++;
    cmalloc_n_mallocs ++;
@@ -564,7 +562,7 @@ void* MC_(realloc) ( ThreadId tid, void* p_old, SizeT new_szB )
    old_szB = old_mc->szB;
 
    /* Get new memory */
-   a_new = (Addr)VG_(cli_malloc)(VG_(clo_alignment), new_szB);
+   a_new = (Addr)VG_(cli_malloc)(alignB, new_szB);
 
    if (a_new) {
       /* In all cases, even when the new size is smaller or unchanged, we
@@ -643,6 +641,15 @@ void* MC_(realloc) ( ThreadId tid, void* p_old, SizeT new_szB )
    }
 
    return (void*)a_new;
+}
+
+void* MC_(realloc) ( ThreadId tid, void* p_old, SizeT new_szB )
+{
+   if (MC_(record_fishy_value_error)(tid, "realloc", "size", new_szB)) {
+      return NULL;
+   } else {
+      return renew_block ( tid, p_old, new_szB, VG_(clo_alignment) );
+   }
 }
 
 SizeT MC_(malloc_usable_size) ( ThreadId tid, void* p )
