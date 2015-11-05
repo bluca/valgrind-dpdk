@@ -342,6 +342,50 @@ static void handle_free_heap( ThreadId tid, void* p )
    die_and_free_mem_heap( tid, seg );
 }
 
+static void* renew_block(ThreadId tid, void* p_old, SizeT new_size, SizeT align)
+{
+    Seg* seg;
+
+    /* First try and find the block. */
+    seg = find_Seg_by_addr( (Addr)p_old );
+    if (!seg)
+       return NULL;
+
+    tl_assert(seg->addr == (Addr)p_old);
+
+    if (new_size <= seg->szB) {
+       /* new size is smaller: allocate, copy from old to new */
+       Addr p_new = (Addr)VG_(cli_malloc)(align, new_size);
+       VG_(memcpy)((void*)p_new, p_old, new_size);
+
+       /* Free old memory */
+       die_and_free_mem_heap( tid, seg );
+
+       /* This has to be after die_and_free_mem_heap, otherwise the
+          former succeeds in shorting out the new block, not the
+          old, in the case when both are on the same list.  */
+       add_new_segment ( tid, p_new, new_size );
+
+       return (void*)p_new;
+    } else {
+       /* new size is bigger: allocate, copy from old to new */
+       Addr p_new = (Addr)VG_(cli_malloc)(align, new_size);
+       VG_(memcpy)((void*)p_new, p_old, seg->szB);
+
+       /* Free old memory */
+       die_and_free_mem_heap( tid, seg );
+
+       /* This has to be after die_and_free_mem_heap, otherwise the
+          former succeeds in shorting out the new block, not the old,
+          in the case when both are on the same list.  NB jrs
+          2008-Sept-11: not sure if this comment is valid/correct any
+          more -- I suspect not. */
+       add_new_segment ( tid, p_new, new_size );
+
+       return (void*)p_new;
+    }
+}
+
 
 /*------------------------------------------------------------*/
 /*--- malloc() et al replacements                          ---*/
@@ -407,46 +451,7 @@ void h_replace___builtin_vec_delete ( ThreadId tid, void* p )
 
 void* h_replace_realloc ( ThreadId tid, void* p_old, SizeT new_size )
 {
-   Seg* seg;
-
-   /* First try and find the block. */
-   seg = find_Seg_by_addr( (Addr)p_old );
-   if (!seg)
-      return NULL;
-
-   tl_assert(seg->addr == (Addr)p_old);
-
-   if (new_size <= seg->szB) {
-      /* new size is smaller: allocate, copy from old to new */
-      Addr p_new = (Addr)VG_(cli_malloc)(VG_(clo_alignment), new_size);
-      VG_(memcpy)((void*)p_new, p_old, new_size);
-
-      /* Free old memory */
-      die_and_free_mem_heap( tid, seg );
-
-      /* This has to be after die_and_free_mem_heap, otherwise the
-         former succeeds in shorting out the new block, not the
-         old, in the case when both are on the same list.  */
-      add_new_segment ( tid, p_new, new_size );
-
-      return (void*)p_new;
-   } else {
-      /* new size is bigger: allocate, copy from old to new */
-      Addr p_new = (Addr)VG_(cli_malloc)(VG_(clo_alignment), new_size);
-      VG_(memcpy)((void*)p_new, p_old, seg->szB);
-
-      /* Free old memory */
-      die_and_free_mem_heap( tid, seg );
-
-      /* This has to be after die_and_free_mem_heap, otherwise the
-         former succeeds in shorting out the new block, not the old,
-         in the case when both are on the same list.  NB jrs
-         2008-Sept-11: not sure if this comment is valid/correct any
-         more -- I suspect not. */
-      add_new_segment ( tid, p_new, new_size );
-
-      return (void*)p_new;
-   }
+   return renew_block(tid, p_old, new_size, VG_(clo_alignment));
 }
 
 SizeT h_replace_malloc_usable_size ( ThreadId tid, void* p )
