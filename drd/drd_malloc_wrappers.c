@@ -115,6 +115,81 @@ static void handle_free(ThreadId tid, void* p)
    tl_assert(success);
 }
 
+/** Helper function for realloc, to support alignment. */
+static void* renew_block(ThreadId tid, void* p_old, SizeT new_size, SizeT align)
+{
+   DRD_Chunk* mc;
+   void*      p_new;
+   SizeT      old_size;
+
+   if (! p_old)
+      return new_block(tid, new_size, align, /*is_zeroed*/False);
+
+   if (new_size == 0)
+   {
+      handle_free(tid, p_old);
+      return NULL;
+   }
+
+   s_cmalloc_n_mallocs++;
+   s_cmalloc_n_frees++;
+   s_cmalloc_bs_mallocd += new_size;
+
+   mc = VG_(HT_lookup)(s_malloc_list, (UWord)p_old);
+   if (mc == NULL)
+   {
+      tl_assert(0);
+      return NULL;
+   }
+
+   old_size = mc->size;
+
+   if (old_size == new_size)
+   {
+      /* size unchanged */
+      mc->where = VG_(record_ExeContext)(tid, 0);
+      p_new = p_old;
+   }
+   else if (new_size < old_size)
+   {
+      /* new size is smaller but nonzero */
+      s_stop_using_mem_callback(mc->data + new_size, old_size - new_size);
+      mc->size = new_size;
+      mc->where = VG_(record_ExeContext)(tid, 0);
+      p_new = p_old;
+   }
+   else
+   {
+      /* new size is bigger */
+      p_new = VG_(cli_malloc)(align, new_size);
+
+      if (p_new)
+      {
+         /* Copy from old to new. */
+         VG_(memcpy)(p_new, p_old, mc->size);
+
+         /* Free old memory. */
+         if (mc->size > 0)
+            s_stop_using_mem_callback(mc->data, mc->size);
+         VG_(cli_free)(p_old);
+         VG_(HT_remove)(s_malloc_list, (UWord)p_old);
+
+         /* Update state information. */
+         mc->data  = (Addr)p_new;
+         mc->size  = new_size;
+         mc->where = VG_(record_ExeContext)(tid, 0);
+         VG_(HT_add_node)(s_malloc_list, mc);
+         s_start_using_mem_callback((Addr)p_new, new_size, 0/*ec_uniq*/);
+      }
+      else
+      {
+         /* Allocation failed -- leave original block untouched. */
+      }
+   }
+
+   return p_new;
+}
+
 /**
  * Remove the information that was stored by DRD_(malloclike_block)() about
  * a memory block.
@@ -177,76 +252,7 @@ static void drd_free(ThreadId tid, void* p)
 */
 static void* drd_realloc(ThreadId tid, void* p_old, SizeT new_size)
 {
-   DRD_Chunk* mc;
-   void*      p_new;
-   SizeT      old_size;
-
-   if (! p_old)
-      return drd_malloc(tid, new_size);
-
-   if (new_size == 0)
-   {
-      drd_free(tid, p_old);
-      return NULL;
-   }
-
-   s_cmalloc_n_mallocs++;
-   s_cmalloc_n_frees++;
-   s_cmalloc_bs_mallocd += new_size;
-
-   mc = VG_(HT_lookup)(s_malloc_list, (UWord)p_old);
-   if (mc == NULL)
-   {
-      tl_assert(0);
-      return NULL;
-   }
-
-   old_size = mc->size;
-
-   if (old_size == new_size)
-   {
-      /* size unchanged */
-      mc->where = VG_(record_ExeContext)(tid, 0);
-      p_new = p_old;
-   }
-   else if (new_size < old_size)
-   {
-      /* new size is smaller but nonzero */
-      s_stop_using_mem_callback(mc->data + new_size, old_size - new_size);
-      mc->size = new_size;
-      mc->where = VG_(record_ExeContext)(tid, 0);
-      p_new = p_old;
-   }
-   else
-   {
-      /* new size is bigger */
-      p_new = VG_(cli_malloc)(VG_(clo_alignment), new_size);
-
-      if (p_new)
-      {
-         /* Copy from old to new. */
-         VG_(memcpy)(p_new, p_old, mc->size);
-
-         /* Free old memory. */
-         if (mc->size > 0)
-            s_stop_using_mem_callback(mc->data, mc->size);
-         VG_(cli_free)(p_old);
-         VG_(HT_remove)(s_malloc_list, (UWord)p_old);
-
-         /* Update state information. */
-         mc->data  = (Addr)p_new;
-         mc->size  = new_size;
-         mc->where = VG_(record_ExeContext)(tid, 0);
-         VG_(HT_add_node)(s_malloc_list, mc);
-         s_start_using_mem_callback((Addr)p_new, new_size, 0/*ec_uniq*/);
-      }
-      else
-      {
-         /* Allocation failed -- leave original block untouched. */
-      }
-   }
-
-   return p_new;
+   return renew_block(tid, p_old, new_size, VG_(clo_alignment));
 }
 
 /** Wrapper for __builtin_new(). */
