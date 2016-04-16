@@ -1180,6 +1180,7 @@ static void panic(const char *str)
 // rte_malloc
 RTE_MALLOC(VG_Z_DPDK_SONAME, rte_malloc);
 RTE_MALLOC(VG_Z_RTE_SONAME,  rte_malloc);
+RTE_MALLOC(VG_Z_RTE_EAL_SONAME,  rte_malloc);
 RTE_MALLOC(SO_SYN_MALLOC,    rte_malloc);
 
 
@@ -1216,6 +1217,7 @@ RTE_MALLOC(SO_SYN_MALLOC,    rte_malloc);
 
 RTE_CALLOC(VG_Z_DPDK_SONAME, rte_calloc);
 RTE_CALLOC(VG_Z_RTE_SONAME,  rte_calloc);
+RTE_CALLOC(VG_Z_RTE_EAL_SONAME,  rte_calloc);
 RTE_CALLOC(SO_SYN_MALLOC,    rte_calloc);
 
 
@@ -1242,6 +1244,7 @@ RTE_CALLOC(SO_SYN_MALLOC,    rte_calloc);
 // rte_zmalloc
 RTE_ZMALLOC(VG_Z_DPDK_SONAME, rte_zmalloc);
 RTE_ZMALLOC(VG_Z_RTE_SONAME,  rte_zmalloc);
+RTE_ZMALLOC(VG_Z_RTE_EAL_SONAME,  rte_zmalloc);
 RTE_ZMALLOC(SO_SYN_MALLOC,    rte_zmalloc);
 
 /*---------------------- rte_malloc_socket ----------------------*/
@@ -1272,6 +1275,7 @@ RTE_ZMALLOC(SO_SYN_MALLOC,    rte_zmalloc);
 // rte_malloc_socket
 RTE_MALLOC_SOCKET(VG_Z_DPDK_SONAME, rte_malloc_socket);
 RTE_MALLOC_SOCKET(VG_Z_RTE_SONAME,  rte_malloc_socket);
+RTE_MALLOC_SOCKET(VG_Z_RTE_EAL_SONAME,  rte_malloc_socket);
 RTE_MALLOC_SOCKET(SO_SYN_MALLOC,    rte_malloc_socket);
 
 
@@ -1310,6 +1314,7 @@ RTE_MALLOC_SOCKET(SO_SYN_MALLOC,    rte_malloc_socket);
 
 RTE_CALLOC_SOCKET(VG_Z_DPDK_SONAME, rte_calloc_socket);
 RTE_CALLOC_SOCKET(VG_Z_RTE_SONAME,  rte_calloc_socket);
+RTE_CALLOC_SOCKET(VG_Z_RTE_EAL_SONAME,  rte_calloc_socket);
 RTE_CALLOC_SOCKET(SO_SYN_MALLOC,    rte_calloc_socket);
 
 
@@ -1338,6 +1343,7 @@ RTE_CALLOC_SOCKET(SO_SYN_MALLOC,    rte_calloc_socket);
 // rte_zmalloc_socket
 RTE_ZMALLOC_SOCKET(VG_Z_DPDK_SONAME, rte_zmalloc_socket);
 RTE_ZMALLOC_SOCKET(VG_Z_RTE_SONAME,  rte_zmalloc_socket);
+RTE_ZMALLOC_SOCKET(VG_Z_RTE_EAL_SONAME,  rte_zmalloc_socket);
 RTE_ZMALLOC_SOCKET(SO_SYN_MALLOC,    rte_zmalloc_socket);
 
 
@@ -1362,6 +1368,7 @@ RTE_ZMALLOC_SOCKET(SO_SYN_MALLOC,    rte_zmalloc_socket);
 // rte_free
 RTE_FREE(VG_Z_DPDK_SONAME,  rte_free );
 RTE_FREE(VG_Z_RTE_SONAME,   rte_free);
+RTE_FREE(VG_Z_RTE_EAL_SONAME,  rte_free);
 RTE_FREE(SO_SYN_MALLOC,     rte_free );
 
 
@@ -1398,6 +1405,7 @@ RTE_FREE(SO_SYN_MALLOC,     rte_free );
 
 RTE_REALLOC(VG_Z_DPDK_SONAME, rte_realloc);
 RTE_REALLOC(VG_Z_RTE_SONAME,  rte_realloc);
+RTE_REALLOC(VG_Z_RTE_EAL_SONAME,  rte_realloc);
 RTE_REALLOC(SO_SYN_MALLOC,    rte_realloc);
 
 
