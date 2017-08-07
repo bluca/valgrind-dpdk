@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -263,6 +263,9 @@ extern void VG_(details_bug_reports_to)   ( const HChar* bug_reports_to );
 /* Should __libc_freeres() be run?  Bugs in it can crash the tool. */
 extern void VG_(needs_libc_freeres) ( void );
 
+/* Should __gnu_cxx::__freeres() be run?  Bugs in it can crash the tool. */
+extern void VG_(needs_cxx_freeres) ( void );
+
 /* Want to have errors detected by Valgrind's core reported?  Includes:
    - pthread API errors (many;  eg. unlocking a non-locked mutex) 
      [currently disabled]
@@ -481,21 +484,6 @@ extern void VG_(needs_malloc_replacement)(
    void  (*p__builtin_vec_delete) ( ThreadId tid, void* p ),
    void* (*prealloc)              ( ThreadId tid, void* p, SizeT new_size ),
    SizeT (*pmalloc_usable_size)   ( ThreadId tid, void* p), 
-   void* (*prte_malloc)           ( ThreadId tid, const char *type, SizeT n,
-           unsigned align ),
-   void* (*prte_calloc)           ( ThreadId tid, const char *type, SizeT nmemb,
-           SizeT size1, unsigned align ),
-   void* (*prte_zmalloc)          ( ThreadId tid, const char *type, SizeT n,
-           unsigned align ),
-   void* (*prte_realloc)          ( ThreadId tid, void* p, SizeT new_size,
-           unsigned align ),
-   void* (*prte_malloc_socket)    ( ThreadId tid, const char *type, SizeT n,
-           unsigned align, int socket ),
-   void* (*prte_calloc_socket)    ( ThreadId tid, const char *type, SizeT nmemb,
-           SizeT size1, unsigned align, int socket ),
-   void* (*prte_zmalloc_socket)   ( ThreadId tid, const char *type, SizeT n,
-           unsigned align, int socket ),
-   void  (*prte_free)             ( ThreadId tid, void* p ),
    SizeT client_malloc_redzone_szB
 );
 

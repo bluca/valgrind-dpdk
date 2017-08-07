@@ -3,7 +3,7 @@
 <meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
 <title>2. NEWS</title>
 <link rel="stylesheet" type="text/css" href="vg_basic.css">
-<meta name="generator" content="DocBook XSL Stylesheets V1.78.1">
+<meta name="generator" content="DocBook XSL Stylesheets V1.79.1">
 <link rel="home" href="index.html" title="Valgrind Documentation">
 <link rel="up" href="dist.html" title="Valgrind Distribution Documents">
 <link rel="prev" href="dist.authors.html" title="1. AUTHORS">
@@ -21,7 +21,535 @@
 <div class="titlepage"><div><div><h1 class="title">
 <a name="dist.news"></a>2. NEWS</h1></div></div></div>
 <div class="literallayout"><p><br>
-      <br>
+      Release 3.13.0 (15 June 2017)<br>
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~<br>
+<br>
+3.13.0 is a feature release with many improvements and the usual collection of<br>
+bug fixes.<br>
+<br>
+This release supports X86/Linux, AMD64/Linux, ARM32/Linux, ARM64/Linux,<br>
+PPC32/Linux, PPC64BE/Linux, PPC64LE/Linux, S390X/Linux, MIPS32/Linux,<br>
+MIPS64/Linux, ARM/Android, ARM64/Android, MIPS32/Android, X86/Android,<br>
+X86/Solaris, AMD64/Solaris and AMD64/MacOSX 10.12.<br>
+<br>
+* ==================== CORE CHANGES ===================<br>
+<br>
+* The translation cache size has been increased to keep up with the demands of<br>
+  large applications.  The maximum number of sectors has increased from 24 to<br>
+  48.  The default number of sectors has increased from 16 to 32 on all<br>
+  targets except Android, where the increase is from 6 to 12.<br>
+<br>
+* The amount of memory that Valgrind can use has been increased from 64GB to<br>
+  128GB.  In particular this means your application can allocate up to about<br>
+  60GB when running on Memcheck.<br>
+<br>
+* Valgrind's default load address has been changed from 0x3800'0000 to<br>
+  0x5800'0000, so as to make it possible to load larger executables.  This<br>
+  should make it possible to load executables of size at least 1200MB.<br>
+<br>
+* A massive spaceleak caused by reading compressed debuginfo files has been<br>
+  fixed.  Valgrind should now be entirely usable with gcc-7.0 "-gz" created<br>
+  debuginfo.<br>
+<br>
+* The C++ demangler has been updated.<br>
+<br>
+* Support for demangling Rust symbols has been added.<br>
+<br>
+* A new representation of stack traces, the "XTree", has been added.  An XTree<br>
+  is a tree of stacktraces with data associated with the stacktraces.  This is<br>
+  used by various tools (Memcheck, Helgrind, Massif) to report on the heap<br>
+  consumption of your program.  Reporting is controlled by the new options<br>
+  --xtree-memory=none|allocs|full and --xtree-memory-file=&lt;file&gt;.<br>
+<br>
+  A report can also be produced on demand using the gdbserver monitor command<br>
+  'xtmemory [&lt;filename&gt;]&gt;'.  The XTree can be output in 2 formats: 'callgrind<br>
+  format' and 'massif format. The existing visualisers for these formats (e.g.<br>
+  callgrind_annotate, KCachegrind, ms_print) can be used to visualise and<br>
+  analyse these reports.<br>
+<br>
+  Memcheck can also produce XTree leak reports using the Callgrind file<br>
+  format.  For more details, see the user manual.<br>
+<br>
+* ================== PLATFORM CHANGES =================<br>
+<br>
+* ppc64: support for ISA 3.0B and various fixes for existing 3.0 support<br>
+<br>
+* amd64: fixes for JIT failure problems on long AVX2 code blocks<br>
+<br>
+* amd64 and x86: support for CET prefixes has been added<br>
+<br>
+* arm32: a few missing ARMv8 instructions have been implemented<br>
+<br>
+* arm64, mips64, mips32: an alternative implementation of Load-Linked and<br>
+  Store-Conditional instructions has been added.  This is to deal with<br>
+  processor implementations that implement the LL/SC specifications strictly<br>
+  and as a result cause Valgrind to hang in certain situations.  The<br>
+  alternative implementation is automatically enabled at startup, as required.<br>
+  You can use the option --sim-hints=fallback-llsc to force-enable it if you<br>
+  want.<br>
+<br>
+* Support for OSX 10.12 has been improved.<br>
+<br>
+* On Linux, clone handling has been improved to honour CLONE_VFORK that<br>
+  involves a child stack.  Note however that CLONE_VFORK | CLONE_VM is handled<br>
+  like CLONE_VFORK (by removing CLONE_VM), so applications that depend on<br>
+  CLONE_VM exact semantics will (still) not work.<br>
+<br>
+* The TileGX/Linux port has been removed because it appears to be both unused<br>
+  and unsupported.<br>
+<br>
+* ==================== TOOL CHANGES ====================<br>
+<br>
+* Memcheck:<br>
+<br>
+  - Memcheck should give fewer false positives when running optimised<br>
+    Clang/LLVM generated code.<br>
+<br>
+  - Support for --xtree-memory and 'xtmemory [&lt;filename&gt;]&gt;'.<br>
+<br>
+  - New command line options --xtree-leak=no|yes and --xtree-leak-file=&lt;file&gt;<br>
+    to produce the end of execution leak report in a xtree callgrind format<br>
+    file.<br>
+<br>
+  - New option 'xtleak' in the memcheck leak_check monitor command, to produce<br>
+    the leak report in an xtree file.<br>
+<br>
+* Massif:<br>
+<br>
+  - Support for --xtree-memory and 'xtmemory [&lt;filename&gt;]&gt;'.<br>
+<br>
+  - For some workloads (typically, for big applications), Massif memory<br>
+    consumption and CPU consumption has decreased significantly.<br>
+<br>
+* Helgrind:<br>
+<br>
+  - Support for --xtree-memory and 'xtmemory [&lt;filename&gt;]&gt;'.<br>
+<br>
+  - addition of client request VALGRIND_HG_GNAT_DEPENDENT_MASTER_JOIN, useful<br>
+    for Ada gnat compiled applications.<br>
+<br>
+* ==================== OTHER CHANGES ====================<br>
+<br>
+* For Valgrind developers: in an outer/inner setup, the outer Valgrind will<br>
+  append the inner guest stacktrace to the inner host stacktrace.  This helps<br>
+  to investigate the errors reported by the outer, when they are caused by the<br>
+  inner guest program (such as an inner regtest).  See README_DEVELOPERS for<br>
+  more info.<br>
+<br>
+* To allow fast detection of callgrind files by desktop environments and file<br>
+  managers, the format was extended to have an optional first line that<br>
+  uniquely identifies the format ("# callgrind format").  Callgrind creates<br>
+  this line now, as does the new xtree functionality.<br>
+<br>
+* File name template arguments (such as --log-file, --xtree-memory-file, ...)<br>
+  have a new %n format letter that is replaced by a sequence number.<br>
+<br>
+* "--version -v" now shows the SVN revision numbers from which Valgrind was<br>
+  built.<br>
+<br>
+* ==================== FIXED BUGS ====================<br>
+<br>
+The following bugs have been fixed or resolved.  Note that "n-i-bz"<br>
+stands for "not in bugzilla" -- that is, a bug that was reported to us<br>
+but never got a bugzilla entry.  We encourage you to file bugs in<br>
+bugzilla (https://bugs.kde.org/enter_bug.cgi?product=valgrind) rather<br>
+than mailing the developers (or mailing lists) directly -- bugs that<br>
+are not entered into bugzilla tend to get forgotten about or ignored.<br>
+<br>
+To see details of a given bug, visit<br>
+  https://bugs.kde.org/show_bug.cgi?id=XXXXXX<br>
+where XXXXXX is the bug number as listed below.<br>
+<br>
+162848  --log-file output isn't split when a program forks<br>
+340777  Illegal instruction on mips (ar71xx)<br>
+341481  MIPS64: Iop_CmpNE32 triggers false warning on MIPS64 platforms<br>
+342040  Valgrind mishandles clone with CLONE_VFORK | CLONE_VM that clones<br>
+        to a different stack.<br>
+344139  x86 stack-seg overrides, needed by the Wine people<br>
+344524  store conditional of guest applications always fail - observed on<br>
+        Octeon3(MIPS)<br>
+348616  Wine/valgrind: noted but unhandled ioctl 0x5390 [..] (DVD_READ_STRUCT)<br>
+352395  Please provide SVN revision info in --version -v<br>
+352767  Wine/valgrind: noted but unhandled ioctl 0x5307 [..] (CDROMSTOP)<br>
+356374  Assertion 'DRD_(g_threadinfo)[tid].pt_threadid !=<br>
+        INVALID_POSIX_THREADID' failed<br>
+358213  helgrind/drd bar_bad testcase hangs or crashes with new glibc pthread<br>
+        barrier implementation<br>
+358697  valgrind.h: Some code remains even when defining NVALGRIND<br>
+359202  Add musl libc configure/compile<br>
+360415  amd64 instructions ADCX and ADOX are not implemented in VEX<br>
+        == 372828 (vex amd64-&gt;IR: 0x66 0xF 0x3A 0x62 0x4A 0x10)<br>
+360429  unhandled ioctl 0x530d with no size/direction hints (CDROMREADMODE1)<br>
+362223  assertion failed when .valgrindrc is a directory instead of a file<br>
+367543  bt/btc/btr/bts x86/x86_64 instructions are poorly-handled wrt flags<br>
+367942  Segfault vgPlain_do_sys_sigaction (m_signals.c:1138)<br>
+368507  can't malloc chunks larger than about 34GB<br>
+368529  Android arm target link error, missing atexit and pthread_atfork<br>
+368863  WARNING: unhandled arm64-linux syscall: 100 (get_robust_list)<br>
+368865  WARNING: unhandled arm64-linux syscall: 272 (kcmp)<br>
+368868  disInstr(arm64): unhandled instruction 0xD53BE000 = cntfrq_el0 (ARMv8)<br>
+368917  WARNING: unhandled arm64-linux syscall: 218 (request_key)<br>
+368918  WARNING: unhandled arm64-linux syscall: 127 (sched_rr_get_interval)<br>
+368922  WARNING: unhandled arm64-linux syscall: 161 (sethostname)<br>
+368924  WARNING: unhandled arm64-linux syscall: 84 (sync_file_range)<br>
+368925  WARNING: unhandled arm64-linux syscall: 130 (tkill)<br>
+368926  WARNING: unhandled arm64-linux syscall: 97 (unshare)<br>
+369459  valgrind on arm64 violates the ARMv8 spec (ldxr/stxr)<br>
+370028  Reduce the number of compiler warnings on MIPS platforms<br>
+370635  arm64 missing syscall getcpu<br>
+371225  Fix order of timer_{gettime,getoverrun,settime} syscalls on arm64<br>
+371227  Clean AArch64 syscall table<br>
+371412  Rename wrap_sys_shmat to sys_shmat like other wrappers<br>
+371471  Valgrind complains about non legit memory leaks on placement new (C++)<br>
+371491  handleAddrOverrides() is [incorrect] when ASO prefix is used<br>
+371503  disInstr(arm64): unhandled instruction 0xF89F0000<br>
+371869  support '%' in symbol Z-encoding<br>
+371916  execution tree xtree concept<br>
+372120  c++ demangler demangles symbols which are not c++<br>
+372185  Support of valgrind on ARMv8 with 32 bit executable<br>
+372188  vex amd64-&gt;IR: 0x66 0xF 0x3A 0x62 0x4A 0x10 0x10 0x48 (PCMPxSTRx $0x10)<br>
+372195  Power PC, xxsel instruction is not always recognized.<br>
+372504  Hanging on exit_group<br>
+372600  process loops forever when fatal signals are arriving quickly<br>
+372794  LibVEX (arm32 front end): 'Assertion szBlg2 &lt;= 3' failed<br>
+373046  Stacks registered by core are never deregistered<br>
+373069  memcheck/tests/leak_cpp_interior fails with GCC 5.1+<br>
+373086  Implement additional Xen hypercalls<br>
+373192  Calling posix_spawn in glibc 2.24 completely broken<br>
+373488  Support for fanotify API on ARM64 architecture<br>
+	== 368864  WARNING: unhandled arm64-linux syscall: 262 (fanotify_init)<br>
+373555  Rename BBPTR to GSPTR as it denotes guest state pointer only<br>
+373938  const IRExpr arguments for matchIRExpr()<br>
+374719  some spelling fixes<br>
+374963  increase valgrind's load address to prevent mmap failure<br>
+375514  valgrind_get_tls_addr() does not work in case of static TLS<br>
+375772  +1 error in get_elf_symbol_info() when computing value of 'hi' address<br>
+        for ML_(find_rx_mapping)()<br>
+375806  Test helgrind/tests/tc22_exit_w_lock fails with glibc 2.24<br>
+375839  Temporary storage exhausted, with long sequence of vfmadd231ps insns<br>
+        == 377159  "vex: the `impossible' happened" still present<br>
+        == 375150  Assertion 'tres.status == VexTransOK' failed<br>
+        == 378068  valgrind crashes on AVX2 function in FFmpeg<br>
+376142  Segfaults on MIPS Cavium Octeon boards<br>
+376279  disInstr(arm64): unhandled instruction 0xD50320FF<br>
+376455  Solaris: unhandled syscall lgrpsys(180)<br>
+376518  Solaris: unhandled fast trap getlgrp(6)<br>
+376611  ppc64 and arm64 don't know about prlimit64 syscall<br>
+376729  PPC64, remove R2 from the clobber list<br>
+        == 371668<br>
+376956  syswrap of SNDDRV and DRM_IOCTL_VERSION causing some addresses<br>
+        to be wrongly marked as addressable<br>
+377066  Some Valgrind unit tests fail to compile on Ubuntu 16.10 with<br>
+        PIE enabled by default<br>
+377376  memcheck/tests/linux/getregset fails with glibc2.24<br>
+377427  PPC64, lxv instruction failing on odd destination register <br>
+377478  PPC64: ISA 3.0 setup fixes<br>
+377698  Missing memory check for futex() uaddr arg for FUTEX_WAKE<br>
+        and FUTEX_WAKE_BITSET, check only 4 args for FUTEX_WAKE_BITSET,<br>
+        and 2 args for FUTEX_TRYLOCK_PI<br>
+377717  Fix massive space leak when reading compressed debuginfo sections<br>
+377891  Update Xen 4.6 domctl wrappers<br>
+377930  fcntl syscall wrapper is missing flock structure check<br>
+378524  libvexmultiarch_test regression on s390x and ppc64<br>
+378535  Valgrind reports INTERNAL ERROR in execve syscall wrapper<br>
+378673  Update libiberty demangler<br>
+378931  Add ISA 3.0B additional isnstructions, add OV32, CA32 setting support<br>
+379039  syscall wrapper for prctl(PR_SET_NAME) must not check more than 16 bytes<br>
+379094  Valgrind reports INTERNAL ERROR in rt_sigsuspend syscall wrapper<br>
+379371  UNKNOWN task message [id 3444, to mach_task_self(), reply 0x603]<br>
+        (task_register_dyld_image_infos)<br>
+379372  UNKNOWN task message [id 3447, to mach_task_self(), reply 0x603]<br>
+        (task_register_dyld_shared_cache_image_info)<br>
+379390  unhandled syscall: mach:70 (host_create_mach_voucher_trap)<br>
+379473  MIPS: add support for rdhwr cycle counter register<br>
+379504  remove TileGX/Linux port<br>
+379525  Support more x86 nop opcodes<br>
+379838  disAMode(x86): not an addr!<br>
+379703  PC ISA 3.0 fixes: stxvx, stxv, xscmpexpdp instructions<br>
+379890  arm: unhandled instruction: 0xEBAD 0x1B05 (sub.w fp, sp, r5, lsl #4)<br>
+379895  clock_gettime does not execute POST syscall wrapper<br>
+379925  PPC64, mtffs does not set the FPCC and C bits in the FPSCR correctly<br>
+379966  WARNING: unhandled amd64-linux syscall: 313 (finit_module)<br>
+380200  xtree generated callgrind files refer to files without directory name<br>
+380202  Assertion failure for cache line size (cls == 64) on aarch64.<br>
+380397  s390x: __GI_strcspn() replacement needed<br>
+n-i-bz  Fix pub_tool_basics.h build issue with g++ 4.4.7.<br>
+<br>
+(3.13.0.RC1:  2 June 2017, vex r3386, valgrind r16434)<br>
+(3.13.0.RC2:  9 June 2017, vex r3389, valgrind r16443)<br>
+(3.13.0:     14 June 2017, vex r3396, valgrind r16446)<br>
+<br>
+<br>
+<br>
+Release 3.12.0 (20 October 2016)<br>
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~<br>
+<br>
+3.12.0 is a feature release with many improvements and the usual<br>
+collection of bug fixes.<br>
+<br>
+This release supports X86/Linux, AMD64/Linux, ARM32/Linux,<br>
+ARM64/Linux, PPC32/Linux, PPC64BE/Linux, PPC64LE/Linux, S390X/Linux,<br>
+MIPS32/Linux, MIPS64/Linux, ARM/Android, ARM64/Android,<br>
+MIPS32/Android, X86/Android, X86/Solaris, AMD64/Solaris, X86/MacOSX<br>
+10.10 and AMD64/MacOSX 10.10.  There is also preliminary support for<br>
+X86/MacOSX 10.11/12, AMD64/MacOSX 10.11/12 and TILEGX/Linux.<br>
+<br>
+* ================== PLATFORM CHANGES =================<br>
+<br>
+* POWER: Support for ISA 3.0 has been added<br>
+<br>
+* mips: support for O32 FPXX ABI has been added.<br>
+* mips: improved recognition of different processors<br>
+* mips: determination of page size now done at run time<br>
+<br>
+* amd64: Partial support for AMD FMA4 instructions.<br>
+<br>
+* arm, arm64: Support for v8 crypto and CRC instructions.<br>
+<br>
+* Improvements and robustification of the Solaris port.<br>
+<br>
+* Preliminary support for MacOS 10.12 (Sierra) has been added.<br>
+<br>
+Whilst 3.12.0 continues to support the 32-bit x86 instruction set, we<br>
+would prefer users to migrate to 64-bit x86 (a.k.a amd64 or x86_64)<br>
+where possible.  Valgrind's support for 32-bit x86 has stagnated in<br>
+recent years and has fallen far behind that for 64-bit x86<br>
+instructions.  By contrast 64-bit x86 is well supported, up to and<br>
+including AVX2.<br>
+<br>
+* ==================== TOOL CHANGES ====================<br>
+<br>
+* Memcheck:<br>
+<br>
+  - Added meta mempool support for describing a custom allocator which:<br>
+     - Auto-frees all chunks assuming that destroying a pool destroys all<br>
+       objects in the pool<br>
+     - Uses itself to allocate other memory blocks<br>
+<br>
+  - New flag --ignore-range-below-sp to ignore memory accesses below<br>
+    the stack pointer, if you really have to.  The related flag<br>
+    --workaround-gcc296-bugs=yes is now deprecated.  Use<br>
+    --ignore-range-below-sp=1024-1 as a replacement.<br>
+<br>
+* DRD:<br>
+<br>
+  - Improved thread startup time significantly on non-Linux platforms.<br>
+<br>
+* DHAT<br>
+<br>
+  - Added collection of the metric "tot-blocks-allocd"<br>
+<br>
+* ==================== OTHER CHANGES ====================<br>
+<br>
+* Replacement/wrapping of malloc/new related functions is now done not just<br>
+  for system libraries by default, but for any globally defined malloc/new<br>
+  related function (both in shared libraries and statically linked alternative<br>
+  malloc implementations).  The dynamic (runtime) linker is excluded, though.<br>
+  To only intercept malloc/new related functions in<br>
+  system libraries use --soname-synonyms=somalloc=nouserintercepts (where<br>
+  "nouserintercepts" can be any non-existing library name).<br>
+  This new functionality is not implemented for MacOS X.<br>
+<br>
+* The maximum number of callers in a suppression entry is now equal to<br>
+  the maximum size for --num-callers (500).<br>
+  Note that --gen-suppressions=yes|all similarly generates suppressions<br>
+  containing up to --num-callers frames.<br>
+<br>
+* New and modified GDB server monitor features:<br>
+<br>
+  - Valgrind's gdbserver now accepts the command 'catch syscall'.<br>
+    Note that you must have GDB &gt;= 7.11 to use 'catch syscall' with<br>
+    gdbserver.<br>
+<br>
+* New option --run-cxx-freeres=&lt;yes|no&gt; can be used to change whether<br>
+  __gnu_cxx::__freeres() cleanup function is called or not. Default is<br>
+  'yes'.<br>
+<br>
+* Valgrind is able to read compressed debuginfo sections in two formats:<br>
+  - zlib ELF gABI format with SHF_COMPRESSED flag (gcc option -gz=zlib)<br>
+  - zlib GNU format with .zdebug sections (gcc option -gz=zlib-gnu)<br>
+<br>
+* Modest JIT-cost improvements: the cost of instrumenting code blocks<br>
+  for the most common use case (x86_64-linux, Memcheck) has been<br>
+  reduced by 10%-15%.<br>
+<br>
+* Improved performance for programs that do a lot of discarding of<br>
+  instruction address ranges of 8KB or less.<br>
+<br>
+* The C++ symbol demangler has been updated.<br>
+<br>
+* More robustness against invalid syscall parameters on Linux.<br>
+<br>
+* ==================== FIXED BUGS ====================<br>
+<br>
+The following bugs have been fixed or resolved.  Note that "n-i-bz"<br>
+stands for "not in bugzilla" -- that is, a bug that was reported to us<br>
+but never got a bugzilla entry.  We encourage you to file bugs in<br>
+bugzilla (https://bugs.kde.org/enter_bug.cgi?product=valgrind) rather<br>
+than mailing the developers (or mailing lists) directly -- bugs that<br>
+are not entered into bugzilla tend to get forgotten about or ignored.<br>
+<br>
+To see details of a given bug, visit<br>
+  https://bugs.kde.org/show_bug.cgi?id=XXXXXX<br>
+where XXXXXX is the bug number as listed below.<br>
+<br>
+191069  Exiting due to signal not reported in XML output<br>
+199468  Suppressions: stack size limited to 25<br>
+        while --num-callers allows more frames<br>
+212352  vex amd64 unhandled opc_aux = 0x 2, first_opcode == 0xDC (FCOM)<br>
+278744  cvtps2pd with redundant RexW<br>
+303877  valgrind doesn't support compressed debuginfo sections.<br>
+345307  Warning about "still reachable" memory when using libstdc++ from gcc 5<br>
+348345  Assertion fails for negative lineno<br>
+348924  MIPS: Load doubles through memory so the code compiles with the FPXX ABI<br>
+351282  V 3.10.1 MIPS softfloat build broken with GCC 4.9.3 / binutils 2.25.1<br>
+351692  Dumps created by valgrind are not readable by gdb (mips32 specific)<br>
+351804  Crash on generating suppressions for "printf" call on OS X 10.10<br>
+352197  mips: mmap2() not wrapped correctly for page size &gt; 4096<br>
+353083  arm64 doesn't implement various xattr system calls<br>
+353084  arm64 doesn't support sigpending system call<br>
+353137  www: update info for Supported Platforms<br>
+353138  www: update "The Valgrind Developers" page<br>
+353370  don't advertise RDRAND in cpuid for Core-i7-4910-like avx2 machine<br>
+        == 365325<br>
+        == 357873<br>
+353384  amd64-&gt;IR: 0x66 0xF 0x3A 0x62 0xD1 0x62 (pcmpXstrX $0x62)<br>
+353398  WARNING: unhandled amd64-solaris syscall: 207<br>
+353660  XML in auxwhat tag not escaping reserved symbols properly<br>
+353680  s390x: Crash with certain glibc versions due to non-implemented TBEGIN<br>
+353727  amd64-&gt;IR: 0x66 0xF 0x3A 0x62 0xD1 0x72 (pcmpXstrX $0x72)<br>
+353802  ELF debug info reader confused with multiple .rodata sections<br>
+353891  Assert 'bad_scanned_addr &lt; VG_ROUNDDN(start+len, sizeof(Addr))' failed<br>
+353917  unhandled amd64-solaris syscall fchdir(120)<br>
+353920  unhandled amd64-solaris syscall: 170<br>
+354274  arm: unhandled instruction: 0xEBAD 0x0AC1 (sub.w sl, sp, r1, lsl #3)<br>
+354392  unhandled amd64-solaris syscall: 171<br>
+354797  Vbit test does not include Iops for Power 8 instruction support<br>
+354883  tst-&gt;os_state.pthread - magic_delta assertion failure on OSX 10.11<br>
+        == 361351<br>
+        == 362920<br>
+        == 366222<br>
+354933  Fix documentation of --kernel-variant=android-no-hw-tls option<br>
+355188  valgrind should intercept all malloc related global functions<br>
+355454  do not intercept malloc related symbols from the runtime linker<br>
+355455  stderr.exp of test cases wrapmalloc and wrapmallocstatic overconstrained<br>
+356044  Dwarf line info reader misinterprets is_stmt register<br>
+356112  mips: replace addi with addiu<br>
+356393  valgrind (vex) crashes because isZeroU happened<br>
+        == 363497<br>
+        == 364497<br>
+356676  arm64-linux: unhandled syscalls 125, 126 (sched_get_priority_max/min)<br>
+356678  arm64-linux: unhandled syscall 232 (mincore)<br>
+356817  valgrind.h triggers compiler errors on MSVC when defining NVALGRIND<br>
+356823  Unsupported ARM instruction: stlex<br>
+357059  x86/amd64: SSE cvtpi2ps with memory source does transition to MMX state<br>
+357338  Unhandled instruction for SHA instructions libcrypto Boring SSL<br>
+357673  crash if I try to run valgrind with a binary link with libcurl<br>
+357833  Setting RLIMIT_DATA to zero breaks with linux 4.5+<br>
+357871  pthread_spin_destroy not properly wrapped<br>
+357887  Calls to VG_(fclose) do not close the file descriptor<br>
+357932  amd64-&gt;IR: accept redundant REX prefixes for {minsd,maxsd} m128, xmm.<br>
+358030  support direct socket calls on x86 32bit (new in linux 4.3)<br>
+358478  drd/tests/std_thread.cpp doesn't build with GCC6<br>
+359133  Assertion 'eltSzB &lt;= ddpa-&gt;poolSzB' failed<br>
+359181  Buffer Overflow during Demangling<br>
+359201  futex syscall "skips" argument 5 if op is FUTEX_WAIT_BITSET<br>
+359289  s390x: popcnt (B9E1) not implemented<br>
+359472  The Power PC vsubuqm instruction doesn't always give the correct result<br>
+359503  Add missing syscalls for aarch64 (arm64)<br>
+359645  "You need libc6-dbg" help message could be more helpful<br>
+359703  s390: wire up separate socketcalls system calls<br>
+359724  getsockname might crash - deref_UInt should call safe_to_deref<br>
+359733  amd64 implement ld.so strchr/index override like x86<br>
+359767  Valgrind does not support the IBM POWER ISA 3.0 instructions, part 1/5<br>
+359829  Power PC test suite none/tests/ppc64/test_isa_2_07.c uses<br>
+        uninitialized data<br>
+359838  arm64: Unhandled instruction 0xD5033F5F (clrex)<br>
+359871  Incorrect mask handling in ppoll<br>
+359952  Unrecognised PCMPESTRM variants (0x70, 0x19)<br>
+360008  Contents of Power vr registers contents is not printed correctly when<br>
+        the --vgdb-shadow-registers=yes option is used<br>
+360035  POWER PC instruction bcdadd and bcdsubtract generate result with<br>
+        non-zero shadow bits<br>
+360378  arm64: Unhandled instruction 0x5E280844 (sha1h  s4, s2)<br>
+360425  arm64 unsupported instruction ldpsw<br>
+        == 364435<br>
+360519  none/tests/arm64/memory.vgtest might fail with newer gcc<br>
+360571  Error about the Android Runtime reading below the stack pointer on ARM<br>
+360574  Wrong parameter type for an ashmem ioctl() call on Android and ARM64<br>
+360749  kludge for multiple .rodata sections on Solaris no longer needed<br>
+360752  raise the number of reserved fds in m_main.c from 10 to 12<br>
+361207  Valgrind does not support the IBM POWER ISA 3.0 instructions, part 2/5<br>
+361226  s390x: risbgn (EC59) not implemented<br>
+361253  [s390x] ex_clone.c:42: undefined reference to `pthread_create'<br>
+361354  ppc64[le]: wire up separate socketcalls system calls<br>
+361615  Inconsistent termination for multithreaded process terminated by signal<br>
+361926  Unhandled Solaris syscall: sysfs(84)<br>
+362009  V dumps core on unimplemented functionality before threads are created<br>
+362329  Valgrind does not support the IBM POWER ISA 3.0 instructions, part 3/5<br>
+362894  missing (broken) support for wbit field on mtfsfi instruction (ppc64)<br>
+362935  [AsusWRT] Assertion 'sizeof(TTEntryC) &lt;= 88' failed<br>
+362953  Request for an update to the Valgrind Developers page<br>
+363680  add renameat2() support<br>
+363705  arm64 missing syscall name_to_handle_at and open_by_handle_at<br>
+363714  ppc64 missing syscalls sync, waitid and name_to/open_by_handle_at<br>
+363858  Valgrind does not support the IBM POWER ISA 3.0 instructions, part 4/5<br>
+364058  clarify in manual limitations of array overruns detections<br>
+364413  pselect sycallwrapper mishandles NULL sigmask<br>
+364728  Power PC, missing support for several HW registers in<br>
+        get_otrack_shadow_offset_wrk()<br>
+364948  Valgrind does not support the IBM POWER ISA 3.0 instructions, part 5/5<br>
+365273  Invalid write to stack location reported after signal handler runs<br>
+365912  ppc64BE segfault during jm-insns test (RELRO)<br>
+366079  FPXX Support for MIPS32 Valgrind<br>
+366138  Fix configure errors out when using Xcode 8 (clang 8.0.0)<br>
+366344  Multiple unhandled instruction for Aarch64<br>
+        (0x0EE0E020, 0x1AC15800, 0x4E284801, 0x5E040023, 0x5E056060)<br>
+367995  Integration of memcheck with custom memory allocator<br>
+368120  x86_linux asm _start functions do not keep 16-byte aligned stack pointer<br>
+368412  False positive result for altivec capability check<br>
+368416  Add tc06_two_races_xml.exp output for ppc64<br>
+368419  Perf Events ioctls not implemented<br>
+368461  mmapunmap test fails on ppc64<br>
+368823  run_a_thread_NORETURN assembly code typo for VGP_arm64_linux target<br>
+369000  AMD64 fma4 instructions unsupported.<br>
+369169  ppc64 fails jm_int_isa_2_07 test<br>
+369175  jm_vec_isa_2_07 test crashes on ppc64<br>
+369209  valgrind loops and eats up all memory if cwd doesn't exist.<br>
+369356  pre_mem_read_sockaddr syscall wrapper can crash with bad sockaddr<br>
+369359  msghdr_foreachfield can crash when handling bad iovec<br>
+369360  Bad sigprocmask old or new sets can crash valgrind<br>
+369361  vmsplice syscall wrapper crashes on bad iovec<br>
+369362  Bad sigaction arguments crash valgrind<br>
+369383  x86 sys_modify_ldt wrapper crashes on bad ptr<br>
+369402  Bad set/get_thread_area pointer crashes valgrind<br>
+369441  bad lvec argument crashes process_vm_readv/writev syscall wrappers<br>
+369446  valgrind crashes on unknown fcntl command<br>
+369439  S390x: Unhandled insns RISBLG/RISBHG and LDE/LDER <br>
+369468  Remove quadratic metapool algorithm using VG_(HT_remove_at_Iter)<br>
+370265  ISA 3.0 HW cap stuff needs updating<br>
+371128  BCD add and subtract instructions on Power BE in 32-bit mode do not work<br>
+372195  Power PC, xxsel instruction is not always recognized<br>
+<br>
+n-i-bz  Fix incorrect (or infinite loop) unwind on RHEL7 x86 and amd64<br>
+n-i-bz  massif --pages-as-heap=yes does not report peak caused by mmap+munmap<br>
+n-i-bz  false positive leaks due to aspacemgr merging heap &amp; non heap segments<br>
+n-i-bz  Fix ppoll_alarm exclusion on OS X<br>
+n-i-bz  Document brk segment limitation, reference manual in limit reached msg.<br>
+n-i-bz  Fix clobber list in none/tests/amd64/xacq_xrel.c [valgrind r15737]<br>
+n-i-bz  Bump allowed shift value for "add.w reg, sp, reg, lsl #N" [vex r3206]<br>
+n-i-bz  amd64: memcheck false positive with shr %edx<br>
+n-i-bz  arm3: Allow early writeback of SP base register in "strd rD, [sp, #-16]"<br>
+n-i-bz  ppc: Fix two cases of PPCAvFpOp vs PPCFpOp enum confusion<br>
+n-i-bz  arm: Fix incorrect register-number constraint check for LDAEX{,B,H,D}<br>
+n-i-bz  DHAT: added collection of the metric "tot-blocks-allocd" <br>
+<br>
+(3.12.0.RC1:  20 October 2016, vex r3282, valgrind r16094)<br>
+(3.12.0.RC2:  20 October 2016, vex r3282, valgrind r16096)<br>
+(3.12.0:      21 October 2016, vex r3282, valgrind r16098)<br>
+<br>
+<br>
+<br>
 Release 3.11.0 (22 September 2015)<br>
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~<br>
 <br>
@@ -217,6 +745,7 @@ where XXXXXX is the bug number as listed below.<br>
 226609  Crediting upstream authors in man page<br>
 231257  Valgrind omits path when executing script from shebang line<br>
 254164  OS X task_info: UNKNOWN task message [id 3405, to mach_task_self() [..]<br>
+294065  Improve the pdb file reader by avoiding hardwired absolute pathnames<br>
 269360  s390x: Fix addressing mode selection for compare-and-swap<br>
 302630  Memcheck: Assertion failed: 'sizeof(UWord) == sizeof(UInt)'<br>
         == 326797<br>
@@ -402,8 +931,7 @@ where XXXXXX is the bug number as listed below.<br>
 351140  arm64 syscalls setuid (146) and setresgid (149) not implemented<br>
 351386  Solaris: Cannot run ld.so.1 under Valgrind<br>
 351474  Fix VG_(iseqsigset) as obvious<br>
-351534  Fix incorrect header guard<br>
-351632  Fix UNKNOWN fcntl 97 on OS X 10.11<br>
+351531  Typo in /include/vki/vki-xen-physdev.h header guard<br>
 351756  Intercept platform_memchr$VARIANT$Haswell on OS X<br>
 351858  ldsoexec support on Solaris<br>
 351873  Newer gcc doesn't allow __builtin_tabortdc[i] in ppc32 mode<br>

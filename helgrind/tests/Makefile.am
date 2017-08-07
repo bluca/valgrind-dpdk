@@ -19,6 +19,7 @@ EXTRA_DIST = \
 	cond_timedwait_test.vgtest cond_timedwait_test.stdout.exp \
 		cond_timedwait_test.stderr.exp \
 	bar_bad.vgtest bar_bad.stdout.exp bar_bad.stderr.exp \
+		bar_bad.stderr.exp-destroy-hang \
 	bar_trivial.vgtest bar_trivial.stdout.exp bar_trivial.stderr.exp \
 	free_is_write.vgtest free_is_write.stdout.exp \
 		free_is_write.stderr.exp \
@@ -45,7 +46,8 @@ EXTRA_DIST = \
 	pth_barrier2.vgtest pth_barrier2.stdout.exp pth_barrier2.stderr.exp \
 	pth_barrier3.vgtest pth_barrier3.stdout.exp pth_barrier3.stderr.exp \
 	pth_destroy_cond.vgtest \
-		pth_destroy_cond.stdout.exp pth_destroy_cond.stderr.exp \
+		pth_destroy_cond.stdout.exp \
+		pth_destroy_cond.stderr.exp pth_destroy_cond.stderr.exp2 \
 	pth_cond_destroy_busy.vgtest pth_cond_destroy_busy.stderr.exp \
 		pth_cond_destroy_busy.stderr.exp-ppc64 \
 		pth_cond_destroy_busy.stderr.exp-solaris \

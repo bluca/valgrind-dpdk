@@ -57,8 +57,12 @@ problems that are common in C and C++ programs.</para>
 
 <para>Problems like these can be difficult to find by other means,
 often remaining undetected for long periods, then causing occasional,
-difficult-to-diagnose crashes.</para>
+  difficult-to-diagnose crashes.</para>
 
+<para>Memcheck also provides <xref linkend="manual-core.xtree"/> memory
+  profiling using the command line
+  option <computeroutput>--xtree-memory</computeroutput> and the monitor command
+   <computeroutput>xtmemory</computeroutput>.</para>
 </sect1>
 
 
@@ -876,6 +880,58 @@ is <option>--errors-for-leak-kinds=definite,possible</option>
     <para> Note that  <option>--show-possibly-lost=no</option> has no effect
       if <option>--show-reachable=yes</option> is specified.</para>
   </varlistentry>
+
+  <varlistentry id="opt.xtree-leak" xreflabel="--xtree-leak">
+    <term>
+      <option><![CDATA[--xtree-leak=<no|yes> [no] ]]></option>
+    </term>
+    <listitem>
+      <para>If set to yes, the results for the leak search done at exit will be
+        output in a 'Callgrind Format' execution tree file. Note that this
+        automatically sets the option <option>--leak-check=full</option>.
+        The produced file
+       will contain the following events:</para>
+      <itemizedlist>
+        <listitem><para><option>RB</option> : Reachable Bytes</para></listitem> 
+         <listitem><para><option>PB</option> : Possibly lost Bytes</para></listitem>
+         <listitem><para><option>IB</option> : Indirectly lost Bytes</para></listitem>
+         <listitem><para><option>DB</option> : Definitely lost Bytes (direct plus indirect)</para></listitem>
+         <listitem><para><option>DIB</option> : Definitely Indirectly lost Bytes (subset of DB)</para></listitem>
+         <listitem><para><option>RBk</option> : reachable Blocks</para></listitem>
+         <listitem><para><option>PBk</option> : Possibly lost Blocks</para></listitem>
+         <listitem><para><option>IBk</option> : Indirectly lost Blocks</para></listitem>
+         <listitem><para><option>DBk</option> : Definitely lost Blocks</para></listitem>
+      </itemizedlist>
+      
+      <para>The increase or decrease for all events above will also be output in
+        the file to provide the delta (increase or decreaseà between 2
+        successive leak searches. For example, <option>iRB</option> is the
+        increase of the <option>RB</option> event, <option>dPBk</option> is the
+        decrease of <option>PBk</option> event. The values for the increase and
+        decrease events will be zero for the first leak search done.</para>
+      
+      <para>See <xref linkend="manual-core.xtree"/> for a detailed explanation
+        about execution trees.</para>
+    </listitem>
+  </varlistentry>
+  
+  <varlistentry id="opt.xtree-leak-file" xreflabel="--xtree-leak-file">
+    <term>
+      <option><![CDATA[--xtree-leak-file=<filename> [default:
+      xtleak.kcg.%p] ]]></option>
+    </term>
+    <listitem>
+      <para>Specifies that Valgrind should produce the xtree leak
+        report in the specified file.  Any <option>%p</option>,
+        <option>%q</option> or  <option>%n</option> sequences appearing in
+        the filename are expanded
+        in exactly the same way as they are for <option>--log-file</option>.
+        See the description of <xref linkend="opt.log-file"/>
+        for details. </para>
+      <para>See <xref linkend="manual-core.xtree"/>
+      for a detailed explanation about execution trees formats. </para>
+    </listitem>
+  </varlistentry>
   
   <varlistentry id="opt.undef-value-errors" xreflabel="--undef-value-errors">
     <term>
@@ -1040,6 +1096,13 @@ is <option>--errors-for-leak-kinds=definite,possible</option>
       and/or by using a smaller value for the
       option <varname>--num-callers</varname>.
       </para>
+      
+      <para>If you want to use
+        <computeroutput>--xtree-memory=full</computeroutput> memory profiling
+        (see <xref linkend="manual-core.xtree"/> ), then you cannot
+        specify <varname>--keep-stacktraces=free</varname>
+        or <varname>--keep-stacktraces=none</varname>.</para>
+
     </listitem>
   </varlistentry>
 
@@ -1107,9 +1170,38 @@ is <option>--errors-for-leak-kinds=definite,possible</option>
       conversions.  This is in violation of the 32-bit PowerPC ELF
       specification, which makes no provision for locations below the
       stack pointer to be accessible.</para>
+
+      <para>This option is deprecated as of version 3.12 and may be
+      removed from future versions.  You should instead use
+      <option>--ignore-range-below-sp</option> to specify the exact
+      range of offsets below the stack pointer that should be ignored.
+      A suitable equivalent
+      is <option>--ignore-range-below-sp=1024-1</option>.
+      </para>
     </listitem>
   </varlistentry>
 
+  <varlistentry id="opt.ignore-range-below-sp"
+                xreflabel="--ignore-range-below-sp">
+    <term>
+      <option><![CDATA[--ignore-range-below-sp=<number>-<number> ]]></option>
+    </term>
+    <listitem>
+      <para>This is a more general replacement for the deprecated
+      <option>--workaround-gcc296-bugs</option> option.  When
+       specified, it causes Memcheck not to report errors for accesses
+       at the specified offsets below the stack pointer.  The two
+       offsets must be positive decimal numbers and -- somewhat
+       counterintuitively -- the first one must be larger, in order to
+       imply a non-wraparound address range to ignore.  For example,
+       to ignore 4 byte accesses at 8192 bytes below the stack
+       pointer,
+       use <option>--ignore-range-below-sp=8192-8189</option>.  Only
+       one range may be specified.
+      </para>
+    </listitem>
+  </varlistentry>
+  
   <varlistentry id="opt.show-mismatched-frees"
                 xreflabel="--show-mismatched-frees">
     <term>
@@ -1794,7 +1886,7 @@ Address 0x8049E28 len 1 defined
   </listitem>
 
   <listitem>
-    <para><varname>leak_check [full*|summary]
+    <para><varname>leak_check [full*|summary|xtleak]
                               [kinds &lt;set&gt;|reachable|possibleleak*|definiteleak]
                               [heuristics heur1,heur2,...]
                               [increased*|changed|any]
@@ -1803,7 +1895,7 @@ Address 0x8049E28 len 1 defined
     performs a leak check. The <varname>*</varname> in the arguments
     indicates the default values. </para>
 
-    <para> If the <varname>[full*|summary]</varname> argument is
+    <para> If the <varname>[full*|summary|xtleak]</varname> argument is
     <varname>summary</varname>, only a summary of the leak search is given;
     otherwise a full leak report is produced.  A full leak report gives
     detailed information for each leak: the stack trace where the leaked blocks
@@ -1817,6 +1909,13 @@ Address 0x8049E28 len 1 defined
     of leak records to output. If this maximum is reached, the leak
     search  outputs the records with the biggest number of bytes.
     </para>
+    <para>The value <varname>xtleak</varname> also produces a full leak report,
+      but output it as an xtree in a file xtleak.kcg.%p.%n (see <xref linkend="opt.log-file"/>).
+      See <xref linkend="manual-core.xtree"/>
+      for a detailed explanation about execution trees formats.
+      See <xref linkend="opt.xtree-leak"/> for the description of the events
+      in a xtree leak file.
+      </para>
 
     <para>The <varname>kinds</varname> argument controls what kind of blocks
     are shown for a <varname>full</varname> leak search.  The set of leak kinds
@@ -2317,6 +2416,59 @@ inform Memcheck about changes to the state of a mempool:</para>
     pool.  The request simply tells Memcheck that the pool exists, so that
     subsequent calls can refer to it as a pool.
     </para>
+  </listitem>
+
+  <listitem>
+    <!-- Note: the below is mostly a copy of valgrind.h. Keep in sync! -->
+    <para>
+      <varname>VALGRIND_CREATE_MEMPOOL_EXT(pool, rzB, is_zeroed, flags)</varname>:
+      Create a memory pool with some flags (that can
+      be OR-ed together) specifying extended behaviour.  When flags is
+      zero, the behaviour is identical to
+    <varname>VALGRIND_CREATE_MEMPOOL</varname>.</para>
+    <itemizedlist>
+      <listitem>
+	<para> The flag <varname>VALGRIND_MEMPOOL_METAPOOL</varname>
+          specifies that the pieces of memory associated with the pool
+          using <varname>VALGRIND_MEMPOOL_ALLOC</varname> will be used
+          by the application as superblocks to dole out MALLOC_LIKE
+          blocks using <varname>VALGRIND_MALLOCLIKE_BLOCK</varname>.
+          In other words, a meta pool is a "2 levels" pool : first
+          level is the blocks described
+          by <varname>VALGRIND_MEMPOOL_ALLOC</varname>.  The second
+          level blocks are described
+          using <varname>VALGRIND_MALLOCLIKE_BLOCK</varname>.  Note
+          that the association between the pool and the second level
+          blocks is implicit : second level blocks will be located
+          inside first level blocks. It is necessary to use
+          the <varname>VALGRIND_MEMPOOL_METAPOOL</varname> flag for
+          such 2 levels pools, as otherwise valgrind will detect
+          overlapping memory blocks, and will abort execution
+          (e.g. during leak search).
+	</para>
+      </listitem>
+      <listitem>
+	<para>
+	  <varname>VALGRIND_MEMPOOL_AUTO_FREE</varname>.  Such a meta
+          pool can also be marked as an 'auto free' pool using the
+          flag <varname>VALGRIND_MEMPOOL_AUTO_FREE</varname>, which
+          must be OR-ed together with
+          the <varname>VALGRIND_MEMPOOL_METAPOOL</varname>. For an
+          'auto free' pool, <varname>VALGRIND_MEMPOOL_FREE</varname>
+          will automatically free the second level blocks that are
+          contained inside the first level block freed
+          with <varname>VALGRIND_MEMPOOL_FREE</varname>.  In other
+          words, calling <varname>VALGRIND_MEMPOOL_FREE</varname> will
+          cause implicit calls
+          to <varname>VALGRIND_FREELIKE_BLOCK</varname> for all the
+          second level blocks included in the first level block.
+          Note: it is an error to use
+          the <varname>VALGRIND_MEMPOOL_AUTO_FREE</varname> flag
+          without the
+         <varname>VALGRIND_MEMPOOL_METAPOOL</varname> flag.
+	</para>
+      </listitem>
+    </itemizedlist>
   </listitem>
 
   <listitem>

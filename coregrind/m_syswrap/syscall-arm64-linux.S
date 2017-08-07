@@ -7,7 +7,7 @@
   This file is part of Valgrind, a dynamic binary instrumentation
   framework.
 
-  Copyright (C) 2013-2015 OpenWorks
+  Copyright (C) 2013-2017 OpenWorks
      info@open-works.net
 
   This program is free software; you can redistribute it and/or
@@ -28,9 +28,10 @@
   The GNU General Public License is contained in the file COPYING.
 */
 
+#include "pub_core_basics_asm.h"
+
 #if defined(VGP_arm64_linux)
 
-#include "pub_core_basics_asm.h"
 #include "pub_core_vkiscnums_asm.h"
 #include "libvex_guest_offsets.h"
       
@@ -169,12 +170,10 @@ ML_(blksys_complete):   .quad 3b
 ML_(blksys_committed):  .quad 4b
 ML_(blksys_finished):   .quad 5b
 
-/* Let the linker know we don't need an executable stack */
-.section .note.GNU-stack,"",%progbits
-
-.previous
-
 #endif // defined(VGP_arm_linux)
+
+/* Let the linker know we don't need an executable stack */
+MARK_STACK_NO_EXEC
    
 /*--------------------------------------------------------------------*/
 /*--- end                                                          ---*/

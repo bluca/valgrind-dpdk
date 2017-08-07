@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -68,6 +68,11 @@ typedef
       Addr  init_thrptr;       // OUT: architecture-specific user per-thread location
       Bool  real_phdr_present; // OUT: PT_PHDR found, include phdr in auxv
       Bool  ldsoexec;          // OUT: the program is the runtime linker itself
+#endif
+
+#if defined(VGO_linux)
+      // INOUT: architecture-specific ELF loading state
+      struct vki_arch_elf_state *arch_elf_state;
 #endif
 
       Addr entry;        // OUT: entrypoint in main executable

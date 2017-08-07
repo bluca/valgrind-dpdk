@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2010-2015 RT-RK
+   Copyright (C) 2010-2017 RT-RK
       mips-valgrind@rt-rk.com
 
    This program is free software; you can redistribute it and/or
@@ -549,6 +549,9 @@ static inline UInt getUInt(const UChar * p)
    dres.jk_StopHere = Ijk_SigILL; \
    dres.whatNext    = Dis_StopHere;
 
+#define LLADDR_INVALID \
+   (mode64 ? mkU64(0xFFFFFFFFFFFFFFFFULL) : mkU32(0xFFFFFFFF))
+
 /*------------------------------------------------------------*/
 /*---                  Field helpers                       ---*/
 /*------------------------------------------------------------*/
@@ -1087,6 +1090,22 @@ static IRExpr *getFCSR(void)
       return IRExpr_Get(offsetof(VexGuestMIPS32State, guest_FCSR), Ity_I32);
 }
 
+static IRExpr *getLLaddr(void)
+{
+   if (mode64)
+      return IRExpr_Get(offsetof(VexGuestMIPS64State, guest_LLaddr), Ity_I64);
+   else
+      return IRExpr_Get(offsetof(VexGuestMIPS32State, guest_LLaddr), Ity_I32);
+}
+
+static IRExpr *getLLdata(void)
+{
+   if (mode64)
+      return IRExpr_Get(offsetof(VexGuestMIPS64State, guest_LLdata), Ity_I64);
+   else
+      return IRExpr_Get(offsetof(VexGuestMIPS32State, guest_LLdata), Ity_I32);
+}
+
 /* Get byte from register reg, byte pos from 0 to 3 (or 7 for MIPS64) . */
 static IRExpr *getByteFromReg(UInt reg, UInt byte_pos)
 {
@@ -1109,6 +1128,22 @@ static void putFCSR(IRExpr * e)
       stmt(IRStmt_Put(offsetof(VexGuestMIPS32State, guest_FCSR), e));
 }
 
+static void putLLaddr(IRExpr * e)
+{
+   if (mode64)
+      stmt(IRStmt_Put(offsetof(VexGuestMIPS64State, guest_LLaddr), e));
+   else
+      stmt(IRStmt_Put(offsetof(VexGuestMIPS32State, guest_LLaddr), e));
+}
+
+static void putLLdata(IRExpr * e)
+{
+   if (mode64)
+      stmt(IRStmt_Put(offsetof(VexGuestMIPS64State, guest_LLdata), e));
+   else
+      stmt(IRStmt_Put(offsetof(VexGuestMIPS32State, guest_LLdata), e));
+}
+
 /* fs   - fpu source register number.
    inst - fpu instruction that needs to be executed.
    sz32 - size of source register.
@@ -1119,12 +1154,12 @@ static void calculateFCSR(UInt fs, UInt ft, UInt inst, Bool sz32, UInt opN)
 {
    IRDirty *d;
    IRTemp fcsr = newTemp(Ity_I32);
-   /* IRExpr_BBPTR() => Need to pass pointer to guest state to helper. */
+   /* IRExpr_GSPTR() => Need to pass pointer to guest state to helper. */
    if (fp_mode64)
       d = unsafeIRDirty_1_N(fcsr, 0,
                             "mips_dirtyhelper_calculate_FCSR_fp64",
                             &mips_dirtyhelper_calculate_FCSR_fp64,
-                            mkIRExprVec_4(IRExpr_BBPTR(),
+                            mkIRExprVec_4(IRExpr_GSPTR(),
                                           mkU32(fs),
                                           mkU32(ft),
                                           mkU32(inst)));
@@ -1132,7 +1167,7 @@ static void calculateFCSR(UInt fs, UInt ft, UInt inst, Bool sz32, UInt opN)
       d = unsafeIRDirty_1_N(fcsr, 0,
                             "mips_dirtyhelper_calculate_FCSR_fp32",
                             &mips_dirtyhelper_calculate_FCSR_fp32,
-                            mkIRExprVec_4(IRExpr_BBPTR(),
+                            mkIRExprVec_4(IRExpr_GSPTR(),
                                           mkU32(fs),
                                           mkU32(ft),
                                           mkU32(inst)));
@@ -1339,6 +1374,16 @@ static IRExpr *mkWidenFromF32(IRType ty, IRExpr * src)
       return src;
 }
 
+/* Convenience function to move to next instruction on condition. */
+static void mips_next_insn_if(IRExpr *condition) {
+   vassert(typeOfIRExpr(irsb->tyenv, condition) == Ity_I1);
+
+   stmt(IRStmt_Exit(condition, Ijk_Boring,
+        mode64 ? IRConst_U64(guest_PC_curr_instr + 4) :
+                 IRConst_U32(guest_PC_curr_instr + 4),
+        OFFB_PC));
+}
+
 static IRExpr *dis_branch_likely(IRExpr * guard, UInt imm)
 {
    ULong branch_offset;
@@ -1429,8 +1474,8 @@ static IRExpr *getDReg(UInt dregNo)
       IRTemp t4 = newTemp(Ity_I32);
       IRTemp t5 = newTemp(Ity_I64);
 
-      assign(t0, getFReg(dregNo));
-      assign(t1, getFReg(dregNo + 1));
+      assign(t0, getFReg(dregNo & (~1)));
+      assign(t1, getFReg(dregNo | 1));
 
       assign(t3, unop(Iop_ReinterpF32asI32, mkexpr(t0)));
       assign(t4, unop(Iop_ReinterpF32asI32, mkexpr(t1)));
@@ -1467,8 +1512,8 @@ static void putDReg(UInt dregNo, IRExpr * e)
       assign(t6, unop(Iop_ReinterpF64asI64, mkexpr(t1)));
       assign(t4, unop(Iop_64HIto32, mkexpr(t6)));  /* hi */
       assign(t5, unop(Iop_64to32, mkexpr(t6)));    /* lo */
-      putFReg(dregNo, unop(Iop_ReinterpI32asF32, mkexpr(t5)));
-      putFReg(dregNo + 1, unop(Iop_ReinterpI32asF32, mkexpr(t4)));
+      putFReg(dregNo & (~1), unop(Iop_ReinterpI32asF32, mkexpr(t5)));
+      putFReg(dregNo | 1, unop(Iop_ReinterpI32asF32, mkexpr(t4)));
    }
 }
 
@@ -2187,17 +2232,19 @@ static void jump_back(IRExpr *condition)
 }
 
 /* Based on s390_irgen_load_and_add32. */
-static void mips_irgen_load_and_add32(IRTemp op1addr, IRTemp new_val,
-                                      UChar rd, Bool putIntoRd)
+static void mips_load_store32(IRTemp op1addr, IRTemp new_val,
+                              IRTemp expd, UChar rd, Bool putIntoRd)
 {
    IRCAS *cas;
    IRTemp old_mem = newTemp(Ity_I32);
-   IRTemp expd    = newTemp(Ity_I32);
-
-   assign(expd, load(Ity_I32, mkexpr(op1addr)));
+   IRType ty      = mode64 ? Ity_I64 : Ity_I32;
 
    cas = mkIRCAS(IRTemp_INVALID, old_mem,
+#if defined (_MIPSEL)
                  Iend_LE, mkexpr(op1addr),
+#else /* _MIPSEB */
+                 Iend_BE, mkexpr(op1addr),
+#endif
                  NULL, mkexpr(expd), /* expected value */
                  NULL, mkexpr(new_val)  /* new value */);
    stmt(IRStmt_CAS(cas));
@@ -2206,21 +2253,22 @@ static void mips_irgen_load_and_add32(IRTemp op1addr, IRTemp new_val,
       Otherwise, it did not */
    jump_back(binop(Iop_CmpNE32, mkexpr(old_mem), mkexpr(expd)));
    if (putIntoRd)
-      putIReg(rd, mkWidenFrom32(Ity_I64, mkexpr(old_mem), True));
+      putIReg(rd, mkWidenFrom32(ty, mkexpr(old_mem), True));
 }
 
 /* Based on s390_irgen_load_and_add64. */
-static void mips_irgen_load_and_add64(IRTemp op1addr, IRTemp new_val,
-                                      UChar rd, Bool putIntoRd)
+static void mips_load_store64(IRTemp op1addr, IRTemp new_val,
+                              IRTemp expd, UChar rd, Bool putIntoRd)
 {
    IRCAS *cas;
    IRTemp old_mem = newTemp(Ity_I64);
-   IRTemp expd    = newTemp(Ity_I64);
-
-   assign(expd, load(Ity_I64, mkexpr(op1addr)));
-
+   vassert(mode64);
    cas = mkIRCAS(IRTemp_INVALID, old_mem,
+#if defined (_MIPSEL)
                  Iend_LE, mkexpr(op1addr),
+#else /* _MIPSEB */
+                 Iend_BE, mkexpr(op1addr),
+#endif
                  NULL, mkexpr(expd), /* expected value */
                  NULL, mkexpr(new_val)  /* new value */);
    stmt(IRStmt_CAS(cas));
@@ -2267,12 +2315,14 @@ static Bool dis_instr_CVM ( UInt theInstr )
             case 0x18: {  /* Store Atomic Add Word - SAA; Cavium OCTEON */
                DIP("saa r%u, (r%u)", regRt, regRs);
                IRTemp addr = newTemp(Ity_I64);
-               IRTemp new  = newTemp(Ity_I32);
-               assign (addr, getIReg(regRs));
-               assign(new, binop(Iop_Add32,
-                                 load(Ity_I32, mkexpr(addr)),
-                                 mkNarrowTo32(ty, getIReg(regRt))));
-               mips_irgen_load_and_add32(addr, new, 0, False);
+               IRTemp new_val = newTemp(Ity_I32);
+               IRTemp old = newTemp(Ity_I32);
+               assign(addr, getIReg(regRs));
+               assign(old, load(Ity_I32, mkexpr(addr)));
+               assign(new_val, binop(Iop_Add32,
+                                     mkexpr(old),
+                                     mkNarrowTo32(ty, getIReg(regRt))));
+               mips_load_store32(addr, new_val, old, 0, False);
                break;
             }
 
@@ -2280,12 +2330,14 @@ static Bool dis_instr_CVM ( UInt theInstr )
             case 0x19: {
                DIP( "saad r%u, (r%u)", regRt, regRs);
                IRTemp addr = newTemp(Ity_I64);
-               IRTemp new  = newTemp(Ity_I64);
-               assign (addr, getIReg(regRs));
-               assign(new, binop(Iop_Add64,
-                                 load(Ity_I64, mkexpr(addr)),
-                                 getIReg(regRt)));
-               mips_irgen_load_and_add64(addr, new, 0, False);
+               IRTemp new_val = newTemp(Ity_I64);
+               IRTemp old = newTemp(Ity_I64);
+               assign(addr, getIReg(regRs));
+               assign(old, load(Ity_I64, mkexpr(addr)));
+               assign(new_val, binop(Iop_Add64,
+                                     mkexpr(old),
+                                     getIReg(regRt)));
+               mips_load_store64(addr, new_val, old, 0, False);
                break;
             }
 
@@ -2298,121 +2350,145 @@ static Bool dis_instr_CVM ( UInt theInstr )
                   /* Load Atomic Increment Word - LAI; Cavium OCTEON2 */
                   case 0x02: {
                      DIP("lai r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I32);
+                     IRTemp new_val = newTemp(Ity_I32);
+                     IRTemp old = newTemp(Ity_I32);
                      assign(addr, getIReg(regRs));
-                     assign(new, binop(Iop_Add32,
-                                       load(Ity_I32, mkexpr(addr)),
-                                       mkU32(1)));
-                     mips_irgen_load_and_add32(addr, new, regRd, True);
+                     assign(old, load(Ity_I32, mkexpr(addr)));
+                     assign(new_val, binop(Iop_Add32,
+                                           mkexpr(old),
+                                           mkU32(1)));
+                     mips_load_store32(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Increment Doubleword - LAID; Cavium OCTEON2 */
                   case 0x03: {
                      DIP("laid r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I64);
+                     IRTemp new_val = newTemp(Ity_I64);
+                     IRTemp old = newTemp(Ity_I64);
                      assign(addr, getIReg(regRs));
-                     assign(new, binop(Iop_Add64,
-                                       load(Ity_I64, mkexpr(addr)),
-                                       mkU64(1)));
-                     mips_irgen_load_and_add64(addr, new, regRd, True);
+                     assign(old, load(Ity_I64, mkexpr(addr)));
+                     assign(new_val, binop(Iop_Add64,
+                                           mkexpr(old),
+                                           mkU64(1)));
+                     mips_load_store64(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Decrement Word - LAD; Cavium OCTEON2 */
                   case 0x06: {
                      DIP("lad r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I32);
+                     IRTemp new_val = newTemp(Ity_I32);
+                     IRTemp old = newTemp(Ity_I32);
                      assign(addr, getIReg(regRs));
-                     assign(new, binop(Iop_Sub32,
-                                       load(Ity_I32, mkexpr(addr)),
-                                       mkU32(1)));
-                     mips_irgen_load_and_add32(addr, new, regRd, True);
+                     assign(old, load(Ity_I32, mkexpr(addr)));
+                     assign(new_val, binop(Iop_Sub32,
+                                           mkexpr(old),
+                                           mkU32(1)));
+                     mips_load_store32(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Decrement Doubleword - LADD; Cavium OCTEON2 */
                   case 0x07: {
                      DIP("ladd r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I64);
-                     assign (addr, getIReg(regRs));
-                     assign(new, binop(Iop_Sub64,
-                                       load(Ity_I64, mkexpr(addr)),
-                                       mkU64(1)));
-                     mips_irgen_load_and_add64(addr, new, regRd, True);
+                     IRTemp new_val = newTemp(Ity_I64);
+                     IRTemp old = newTemp(Ity_I64);
+                     assign(addr, getIReg(regRs));
+                     assign(old, load(Ity_I64, mkexpr(addr)));
+                     assign(new_val, binop(Iop_Sub64,
+                                           mkexpr(old),
+                                           mkU64(1)));
+                     mips_load_store64(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Set Word - LAS; Cavium OCTEON2 */
                   case 0x0a: {
                      DIP("las r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I32);
+                     IRTemp new_val = newTemp(Ity_I32);
+                     IRTemp old = newTemp(Ity_I32);
                      assign(addr, getIReg(regRs));
-                     assign(new, mkU32(0xffffffff));
-                     mips_irgen_load_and_add32(addr, new, regRd, True);
+                     assign(new_val, mkU32(0xffffffff));
+                     assign(old, load(Ity_I32, mkexpr(addr)));
+                     mips_load_store32(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Set Doubleword - LASD; Cavium OCTEON2 */
                   case 0x0b: {
                      DIP("lasd r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I64);
-                     assign (addr, getIReg(regRs));
-                     assign(new, mkU64(0xffffffffffffffffULL));
-                     mips_irgen_load_and_add64(addr, new, regRd, True);
+                     IRTemp new_val = newTemp(Ity_I64);
+                     IRTemp old = newTemp(Ity_I64);
+                     assign(addr, getIReg(regRs));
+                     assign(new_val, mkU64(0xffffffffffffffffULL));
+                     assign(old, load(Ity_I64, mkexpr(addr)));
+                     mips_load_store64(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Clear Word - LAC; Cavium OCTEON2 */
                   case 0x0e: {
                      DIP("lac r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I32);
-                     assign (addr, getIReg(regRs));
-                     assign(new, mkU32(0));
-                     mips_irgen_load_and_add32(addr, new, regRd, True);
+                     IRTemp new_val = newTemp(Ity_I32);
+                     IRTemp old = newTemp(Ity_I32);
+                     assign(addr, getIReg(regRs));
+                     assign(new_val, mkU32(0));
+                     assign(old, load(Ity_I32, mkexpr(addr)));
+                     mips_load_store32(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Clear Doubleword - LACD; Cavium OCTEON2 */
                   case 0x0f: {
                      DIP("lacd r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I64);
+                     IRTemp new_val = newTemp(Ity_I64);
+                     IRTemp old = newTemp(Ity_I64);
                      assign(addr, getIReg(regRs));
-                     assign(new, mkU64(0));
-                     mips_irgen_load_and_add64(addr, new, regRd, True);
+                     assign(new_val, mkU64(0));
+                     assign(old, load(Ity_I64, mkexpr(addr)));
+                     mips_load_store64(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Add Word - LAA; Cavium OCTEON2 */
                   case 0x12: {
                      DIP("laa r%u,(r%u),r%u\n", regRd, regRs, regRt);
-                     IRTemp new  = newTemp(Ity_I32);
+                     IRTemp new_val = newTemp(Ity_I32);
+                     IRTemp old = newTemp(Ity_I32);
                      assign(addr, getIReg(regRs));
-                     assign(new, binop(Iop_Add32,
-                                       load(Ity_I32, mkexpr(addr)),
-                                       mkNarrowTo32(ty, getIReg(regRt))));
-                     mips_irgen_load_and_add32(addr, new, regRd, True);
+                     assign(old, load(Ity_I32, mkexpr(addr)));
+                     assign(new_val, binop(Iop_Add32,
+                                           mkexpr(old),
+                                           mkNarrowTo32(ty, getIReg(regRt))));
+                     mips_load_store32(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Add Doubleword - LAAD; Cavium OCTEON2 */
                   case 0x13: {
                      DIP("laad r%u,(r%u),r%u\n", regRd, regRs, regRt);
-                     IRTemp new  = newTemp(Ity_I64);
-                     assign (addr, getIReg(regRs));
-                     assign(new, binop(Iop_Add64,
-                                       load(Ity_I64, mkexpr(addr)),
-                                       getIReg(regRt)));
-                     mips_irgen_load_and_add64(addr, new, regRd, True);
+                     IRTemp new_val = newTemp(Ity_I64);
+                     IRTemp old = newTemp(Ity_I64);
+                     assign(addr, getIReg(regRs));
+                     assign(old, load(Ity_I64, mkexpr(addr)));
+                     assign(new_val, binop(Iop_Add64,
+                                           load(Ity_I64, mkexpr(addr)),
+                                           getIReg(regRt)));
+                     mips_load_store64(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Swap Word - LAW; Cavium OCTEON2 */
                   case 0x16: {
                      DIP("law r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I32);
+                     IRTemp new_val = newTemp(Ity_I32);
+                     IRTemp old = newTemp(Ity_I32);
                      assign(addr, getIReg(regRs));
-                     assign(new, mkNarrowTo32(ty, getIReg(regRt)));
-                     mips_irgen_load_and_add32(addr, new, regRd, True);
+                     assign(new_val, mkNarrowTo32(ty, getIReg(regRt)));
+                     assign(old, load(Ity_I32, mkexpr(addr)));
+                     mips_load_store32(addr, new_val, old, regRd, True);
                      break;
                   }
                   /* Load Atomic Swap Doubleword - LAWD; Cavium OCTEON2 */
                   case 0x17: {
                      DIP("lawd r%u,(r%u)\n", regRd, regRs);
-                     IRTemp new  = newTemp(Ity_I64);
+                     IRTemp new_val = newTemp(Ity_I64);
+                     IRTemp old = newTemp(Ity_I64);
                      assign(addr, getIReg(regRs));
-                     assign(new, getIReg(regRt));
-                     mips_irgen_load_and_add64(addr, new, regRd, True);
+                     assign(new_val, getIReg(regRt));
+                     assign(old, load(Ity_I64, mkexpr(addr)));
+                     mips_load_store64(addr, new_val, old, regRd, True);
                      break;
                   }
                   default:
@@ -12056,6 +12132,7 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
    dres.len = 0;
    dres.continueAt = 0;
    dres.jk_StopHere = Ijk_INVALID;
+   dres.hint        = Dis_HintNone;
 
    delay_slot_branch = likely_delay_slot = delay_slot_jump = False;
 
@@ -12228,28 +12305,39 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
    case 0x11: {  /* COP1 */
       if (fmt == 0x3 && fd == 0 && function == 0) {  /* MFHC1 */
          DIP("mfhc1 r%u, f%u", rt, fs);
-         if (fp_mode64) {
-            t0 = newTemp(Ity_I64);
-            t1 = newTemp(Ity_I32);
-            assign(t0, unop(Iop_ReinterpF64asI64, getDReg(fs)));
-            assign(t1, unop(Iop_64HIto32, mkexpr(t0)));
-            putIReg(rt, mkWidenFrom32(ty, mkexpr(t1), True));
-         } else {
-            ILLEGAL_INSTRUCTON;
+         if (VEX_MIPS_CPU_HAS_MIPS32R2(archinfo->hwcaps)) {
+            if (fp_mode64) {
+               t0 = newTemp(Ity_I64);
+               t1 = newTemp(Ity_I32);
+               assign(t0, unop(Iop_ReinterpF64asI64, getDReg(fs)));
+               assign(t1, unop(Iop_64HIto32, mkexpr(t0)));
+               putIReg(rt, mkWidenFrom32(ty, mkexpr(t1), True));
+               break;
+            } else {
+               putIReg(rt, mkWidenFrom32(ty, unop(Iop_ReinterpF32asI32,
+                                                  getFReg(fs | 1)), True));
+               break;
+            }
          }
+         ILLEGAL_INSTRUCTON;
          break;
       } else if (fmt == 0x7 && fd == 0 && function == 0) {  /* MTHC1 */
          DIP("mthc1 r%u, f%u", rt, fs);
-         if (fp_mode64) {
-            t0 = newTemp(Ity_I64);
-            assign(t0, binop(Iop_32HLto64, getIReg(rt),
-                             unop(Iop_ReinterpF32asI32,
-                                  getLoFromF64(Ity_F64 /* 32FPR mode. */,
-                                               getDReg(fs)))));
-            putDReg(fs, unop(Iop_ReinterpI64asF64, mkexpr(t0)));
-         } else {
-            ILLEGAL_INSTRUCTON;
+         if (VEX_MIPS_CPU_HAS_MIPS32R2(archinfo->hwcaps)) {
+            if (fp_mode64) {
+               t0 = newTemp(Ity_I64);
+               assign(t0, binop(Iop_32HLto64, mkNarrowTo32(ty, getIReg(rt)),
+                                unop(Iop_ReinterpF32asI32,
+                                     getLoFromF64(Ity_F64, getDReg(fs)))));
+               putDReg(fs, unop(Iop_ReinterpI64asF64, mkexpr(t0)));
+               break;
+            } else {
+               putFReg(fs | 1, unop(Iop_ReinterpI32asF32,
+                                    mkNarrowTo32(ty, getIReg(rt))));
+               break;
+            }
          }
+         ILLEGAL_INSTRUCTON;
          break;
       } else if (fmt == 0x8) {  /* BC */
          /* FcConditionalCode(bc1_cc) */
@@ -12525,55 +12613,25 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
                switch (fmt) {
                case 0x10:  /* S */
                   DIP("movn.s f%u, f%u, r%u", fd, fs, rt);
-                  t1 = newTemp(Ity_F64);
-                  t2 = newTemp(Ity_F64);
-                  t3 = newTemp(Ity_I1);
-                  t4 = newTemp(Ity_F64);
-                  if (mode64) {
-                     assign(t1, getFReg(fs));
-                     assign(t2, getFReg(fd));
-                     assign(t3, binop(Iop_CmpNE64, mkU64(0), getIReg(rt)));
-                  } else {
-                     if (fp_mode64) {
-                        assign(t1, getFReg(fs));
-                        assign(t2, getFReg(fd));
-                        assign(t3, binop(Iop_CmpNE32, mkU32(0), getIReg(rt)));
-                     } else {
-                        assign(t1, unop(Iop_F32toF64, getFReg(fs)));
-                        assign(t2, unop(Iop_F32toF64, getFReg(fd)));
-                        assign(t3, binop(Iop_CmpNE32, mkU32(0), getIReg(rt)));
-                     }
-                  }
+                  t1 = newTemp(Ity_I1);
 
-                  assign(t4, IRExpr_ITE(mkexpr(t3), mkexpr(t1), mkexpr(t2)));
-                  if (fp_mode64) {
-                     IRTemp f = newTemp(Ity_F64);
-                     IRTemp fd_hi = newTemp(Ity_I32);
-                     t5 = newTemp(Ity_I64);
-                     assign(f, getFReg(fd));
-                     assign(fd_hi, unop(Iop_64HIto32, unop(Iop_ReinterpF64asI64,
-                                        mkexpr(f))));
+                  if (mode64)
+                     assign(t1, binop(Iop_CmpNE64, mkU64(0), getIReg(rt)));
+                  else
+                     assign(t1, binop(Iop_CmpNE32, mkU32(0), getIReg(rt)));
 
-                     assign(t5, mkWidenFrom32(Ity_I64, unop(Iop_64to32,
-                                unop(Iop_ReinterpF64asI64, mkexpr(t4))), True));
-
-                     putFReg(fd, unop (Iop_ReinterpI64asF64, mkexpr(t5)));
-                  } else
-                     putFReg(fd, binop(Iop_F64toF32, get_IR_roundingmode(),
-                                       mkexpr(t4)));
+                  putFReg(fd, IRExpr_ITE(mkexpr(t1), getFReg(fs), getFReg(fd)));
                   break;
                case 0x11:  /* D */
                   DIP("movn.d f%u, f%u, r%u", fd, fs, rt);
-
-                  t3 = newTemp(Ity_I1);
-                  t4 = newTemp(Ity_F64);
+                  t1 = newTemp(Ity_I1);
 
                   if (mode64)
-                     assign(t3, binop(Iop_CmpNE64, mkU64(0), getIReg(rt)));
+                     assign(t1, binop(Iop_CmpNE64, mkU64(0), getIReg(rt)));
                   else
-                     assign(t3, binop(Iop_CmpNE32, mkU32(0), getIReg(rt)));
+                     assign(t1, binop(Iop_CmpNE32, mkU32(0), getIReg(rt)));
 
-                  putDReg(fd, IRExpr_ITE(mkexpr(t3), getDReg(fs), getDReg(fd)));
+                  putDReg(fd, IRExpr_ITE(mkexpr(t1), getDReg(fs), getDReg(fd)));
                   break;
                default:
                   goto decode_failure;
@@ -12584,51 +12642,25 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
                switch (fmt) {
                case 0x10:  /* S */
                   DIP("movz.s f%u, f%u, r%u", fd, fs, rt);
+                  t1 = newTemp(Ity_I1);
 
-                  t1 = newTemp(Ity_F64);
-                  t2 = newTemp(Ity_F64);
-                  t3 = newTemp(Ity_I1);
-                  t4 = newTemp(Ity_F64);
-                  if (fp_mode64) {
-                     assign(t1, getFReg(fs));
-                     assign(t2, getFReg(fd));
-                     if (mode64)
-                        assign(t3, binop(Iop_CmpEQ64, mkU64(0), getIReg(rt)));
-                     else
-                        assign(t3, binop(Iop_CmpEQ32, mkU32(0), getIReg(rt)));
-                  } else {
-                     assign(t1, unop(Iop_F32toF64, getFReg(fs)));
-                     assign(t2, unop(Iop_F32toF64, getFReg(fd)));
-                     assign(t3, binop(Iop_CmpEQ32, mkU32(0), getIReg(rt)));
-                  }
-                  assign(t4, IRExpr_ITE(mkexpr(t3), mkexpr(t1), mkexpr(t2)));
+                  if (mode64)
+                     assign(t1, binop(Iop_CmpEQ64, mkU64(0), getIReg(rt)));
+                  else
+                     assign(t1, binop(Iop_CmpEQ32, mkU32(0), getIReg(rt)));
 
-                 if (fp_mode64) {
-                     IRTemp f = newTemp(Ity_F64);
-                     IRTemp fd_hi = newTemp(Ity_I32);
-                     t7 = newTemp(Ity_I64);
-                     assign(f, getFReg(fd));
-                     assign(fd_hi, unop(Iop_64HIto32,
-                                   unop(Iop_ReinterpF64asI64, mkexpr(f))));
-                     assign(t7, mkWidenFrom32(Ity_I64, unop(Iop_64to32,
-                                unop(Iop_ReinterpF64asI64, mkexpr(t4))), True));
-
-                     putFReg(fd, unop(Iop_ReinterpI64asF64, mkexpr(t7)));
-                  } else
-                     putFReg(fd, binop(Iop_F64toF32, get_IR_roundingmode(),
-                                       mkexpr(t4)));
-
+                  putFReg(fd, IRExpr_ITE(mkexpr(t1), getFReg(fs), getFReg(fd)));
                   break;
                case 0x11:  /* D */
                   DIP("movz.d f%u, f%u, r%u", fd, fs, rt);
-                  t3 = newTemp(Ity_I1);
-                  t4 = newTemp(Ity_F64);
-                  if (mode64)
-                     assign(t3, binop(Iop_CmpEQ64, mkU64(0), getIReg(rt)));
-                  else
-                     assign(t3, binop(Iop_CmpEQ32, mkU32(0), getIReg(rt)));
+                  t1 = newTemp(Ity_I1);
 
-                  putDReg(fd, IRExpr_ITE(mkexpr(t3), getDReg(fs), getDReg(fd)));
+                  if (mode64)
+                     assign(t1, binop(Iop_CmpEQ64, mkU64(0), getIReg(rt)));
+                  else
+                     assign(t1, binop(Iop_CmpEQ32, mkU32(0), getIReg(rt)));
+
+                  putDReg(fd, IRExpr_ITE(mkexpr(t1), getDReg(fs), getDReg(fd)));
                   break;
                default:
                   goto decode_failure;
@@ -12829,13 +12861,14 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
 
                      putFReg(fs, mkWidenFromF32(tyF, mkexpr(t1)));
                   } else
-                     putFReg(fs, unop(Iop_ReinterpI32asF32, getIReg(rt)));
+                     putFReg(fs, unop(Iop_ReinterpI32asF32,
+                                      mkNarrowTo32(ty, getIReg(rt))));
                   break;
 
                case 0x5:  /* Doubleword Move to Floating Point DMTC1; MIPS64 */
                   DIP("dmtc1 r%u, f%u", rt, fs);
                   vassert(mode64);
-                  putFReg(fs, unop(Iop_ReinterpI64asF64, getIReg(rt)));
+                  putDReg(fs, unop(Iop_ReinterpI64asF64, getIReg(rt)));
                   break;
 
                case 0x0:  /* MFC1 */
@@ -12847,13 +12880,15 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
                      assign(t1, unop(Iop_64to32, mkexpr(t0)));
                      putIReg(rt, mkWidenFrom32(ty, mkexpr(t1), True));
                   } else
-                     putIReg(rt, unop(Iop_ReinterpF32asI32, getFReg(fs)));
+                     putIReg(rt, mkWidenFrom32(ty,
+                                 unop(Iop_ReinterpF32asI32, getFReg(fs)),
+                                 True));
                   break;
 
                case 0x1:  /* Doubleword Move from Floating Point DMFC1;
                              MIPS64 */
                   DIP("dmfc1 r%u, f%u", rt, fs);
-                  putIReg(rt, unop(Iop_ReinterpF64asI64, getFReg(fs)));
+                  putIReg(rt, unop(Iop_ReinterpF64asI64, getDReg(fs)));
                   break;
 
                case 0x6:  /* CTC1 */
@@ -13055,12 +13090,16 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
 
                   case 0x15:  /* L */
                      DIP("cvt.s.l %u, %u", fd, fs);
-                     calculateFCSR(fs, 0, CVTSL, False, 1);
-                     t0 = newTemp(Ity_I64);
-                     assign(t0, unop(Iop_ReinterpF64asI64, getFReg(fs)));
+                     if (fp_mode64) {
+                        calculateFCSR(fs, 0, CVTSL, False, 1);
+                        t0 = newTemp(Ity_I64);
+                        assign(t0, unop(Iop_ReinterpF64asI64, getFReg(fs)));
 
-                     putFReg(fd, mkWidenFromF32(tyF, binop(Iop_I64StoF32,
-                                 get_IR_roundingmode(), mkexpr(t0))));
+                        putFReg(fd, mkWidenFromF32(tyF, binop(Iop_I64StoF32,
+                                    get_IR_roundingmode(), mkexpr(t0))));
+                     } else {
+                        ILLEGAL_INSTRUCTON;
+                     }
                      break;
 
                   default:
@@ -13434,60 +13473,20 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
          }
       }
       break;  /* COP1 */
-   case 0x10:  /* COP0 */
-      if (rs == 0) {  /* MFC0 */
-         DIP("mfc0 r%u, r%u, %u", rt, rd, sel);
-         IRTemp   val  = newTemp(Ity_I32);
-         IRExpr** args = mkIRExprVec_3 (IRExpr_BBPTR(), mkU32(rd), mkU32(sel));
-         IRDirty *d = unsafeIRDirty_1_N(val,
-                                        0,
-                                        "mips32_dirtyhelper_mfc0",
-                                        &mips32_dirtyhelper_mfc0,
-                                        args);
-         stmt(IRStmt_Dirty(d));
-         putIReg(rt, mkexpr(val));
-      } else if (rs == 1) {
-         /* Doubleword Move from Coprocessor 0 - DMFC0; MIPS64 */
-         DIP("dmfc0 r%u, r%u, %u", rt, rd, sel);
-         IRTemp   val  = newTemp(Ity_I64);
-         IRExpr** args = mkIRExprVec_3 (IRExpr_BBPTR(), mkU64(rd), mkU64(sel));
-         IRDirty *d = unsafeIRDirty_1_N(val,
-                                        0,
-                                        "mips64_dirtyhelper_dmfc0",
-                                        &mips64_dirtyhelper_dmfc0,
-                                        args);
-         stmt(IRStmt_Dirty(d));
-         putDReg(rt, mkexpr(val));
-      } else
-         goto decode_failure;
-      break;
 
    case 0x31:  /* LWC1 */
       /* Load Word to Floating Point - LWC1 (MIPS32) */
       DIP("lwc1 f%u, %u(r%u)", ft, imm, rs);
+      LOAD_STORE_PATTERN;
       if (fp_mode64) {
-         t1 = newTemp(Ity_F32);
+         t0 = newTemp(Ity_F32);
          t2 = newTemp(Ity_I64);
-         if (mode64) {
-            t0 = newTemp(Ity_I64);
-            /* new LO */
-            assign(t0, binop(Iop_Add64, getIReg(rs),
-                             mkU64(extend_s_16to64(imm))));
-         } else {
-            t0 = newTemp(Ity_I32);
-            /* new LO */
-            assign(t0, binop(Iop_Add32, getIReg(rs),
-                             mkU32(extend_s_16to32(imm))));
-         }
-         assign(t1, load(Ity_F32, mkexpr(t0)));
+         assign(t0, load(Ity_F32, mkexpr(t1)));
          assign(t2, mkWidenFrom32(Ity_I64, unop(Iop_ReinterpF32asI32,
-                                                mkexpr(t1)), True));
+                                                mkexpr(t0)), True));
          putDReg(ft, unop(Iop_ReinterpI64asF64, mkexpr(t2)));
       } else {
-         t0 = newTemp(Ity_I32);
-         assign(t0, binop(Iop_Add32, getIReg(rs),
-                           mkU32(extend_s_16to32(imm))));
-         putFReg(ft, load(Ity_F32, mkexpr(t0)));
+         putFReg(ft, load(Ity_F32, mkexpr(t1)));
       }
       break;
 
@@ -13580,16 +13579,14 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
       case 0x0: {  /* LWXC1 */
          /* Load Word  Indexed to Floating Point - LWXC1 (MIPS32r2) */
          DIP("lwxc1 f%u, r%u(r%u)", fd, rt, rs);
+         t2 = newTemp(ty);
+         assign(t2, binop(mode64 ? Iop_Add64 : Iop_Add32, getIReg(rs),
+                          getIReg(rt)));
          if (fp_mode64) {
             t0 = newTemp(Ity_I64);
             t1 = newTemp(Ity_I32);
             t3 = newTemp(Ity_F32);
             t4 = newTemp(Ity_I64);
-
-            t2 = newTemp(ty);
-            /* new LO */
-            assign(t2, binop(mode64 ? Iop_Add64 : Iop_Add32, getIReg(rs),
-                             getIReg(rt)));
             assign(t3, load(Ity_F32, mkexpr(t2)));
 
             assign(t4, mkWidenFrom32(Ity_I64, unop(Iop_ReinterpF32asI32,
@@ -13597,9 +13594,7 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
 
             putFReg(fd, unop(Iop_ReinterpI64asF64, mkexpr(t4)));
          } else {
-            t0 = newTemp(Ity_I32);
-            assign(t0, binop(Iop_Add32, getIReg(rs), getIReg(rt)));
-            putFReg(fd, load(Ity_F32, mkexpr(t0)));
+            putFReg(fd, load(Ity_F32, mkexpr(t2)));
          }
          break;
       }
@@ -13607,90 +13602,70 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
       case 0x1: {  /* LDXC1 */
          /* Load Doubleword  Indexed to Floating Point
             LDXC1 (MIPS32r2 and MIPS64) */
-         if (fp_mode64) {
-            DIP("ldxc1 f%u, r%u(r%u)", fd, rt, rs);
-            t0 = newTemp(ty);
-            assign(t0, binop(mode64 ? Iop_Add64 : Iop_Add32, getIReg(rs),
-                             getIReg(rt)));
-            putFReg(fd, load(Ity_F64, mkexpr(t0)));
-            break;
-         } else {
-            t0 = newTemp(Ity_I32);
-            assign(t0, binop(Iop_Add32, getIReg(rs), getIReg(rt)));
-
-            t1 = newTemp(Ity_I32);
-            assign(t1, binop(Iop_Add32, mkexpr(t0), mkU32(4)));
-
-#if defined (_MIPSEL)
-            putFReg(fd, load(Ity_F32, mkexpr(t0)));
-            putFReg(fd + 1, load(Ity_F32, mkexpr(t1)));
-#elif defined (_MIPSEB)
-            putFReg(fd + 1, load(Ity_F32, mkexpr(t0)));
-            putFReg(fd, load(Ity_F32, mkexpr(t1)));
-#endif
-            break;
-         }
+         DIP("ldxc1 f%u, r%u(r%u)", fd, rt, rs);
+         t0 = newTemp(ty);
+         assign(t0, binop(mode64 ? Iop_Add64 : Iop_Add32, getIReg(rs),
+                          getIReg(rt)));
+         putDReg(fd, load(Ity_F64, mkexpr(t0)));
+         break;
       }
 
       case 0x5:  /* Load Doubleword Indexed Unaligned to Floating Point - LUXC1;
-                    MIPS32r2 */
+                    MIPS32r2 and MIPS64 */
          DIP("luxc1 f%u, r%u(r%u)", fd, rt, rs);
-         t0 = newTemp(Ity_I64);
-         t1 = newTemp(Ity_I64);
-         assign(t0, binop(Iop_Add64, getIReg(rs), getIReg(rt)));
-         assign(t1, binop(Iop_And64, mkexpr(t0),
-                                     mkU64(0xfffffffffffffff8ULL)));
-         putFReg(fd, load(Ity_F64, mkexpr(t1)));
+         if ((mode64 || VEX_MIPS_CPU_HAS_MIPS32R2(archinfo->hwcaps))
+             && fp_mode64) {
+            t0 = newTemp(ty);
+            t1 = newTemp(ty);
+            assign(t0, binop(mode64 ? Iop_Add64 : Iop_Add32,
+                             getIReg(rs), getIReg(rt)));
+            assign(t1, binop(mode64 ? Iop_And64 : Iop_And32,
+                             mkexpr(t0),
+                             mode64 ? mkU64(0xfffffffffffffff8ULL)
+                                    : mkU32(0xfffffff8ULL)));
+            putFReg(fd, load(Ity_F64, mkexpr(t1)));
+         } else {
+            ILLEGAL_INSTRUCTON;
+         }
          break;
 
       case 0x8: {  /* Store Word Indexed from Floating Point - SWXC1 */
          DIP("swxc1 f%u, r%u(r%u)", ft, rt, rs);
+         t0 = newTemp(ty);
+         assign(t0, binop(mode64 ? Iop_Add64 : Iop_Add32, getIReg(rs),
+                          getIReg(rt)));
          if (fp_mode64) {
-            t0 = newTemp(ty);
-            assign(t0, binop(mode64 ? Iop_Add64 : Iop_Add32, getIReg(rs),
-                             getIReg(rt)));
             store(mkexpr(t0), getLoFromF64(tyF, getFReg(fs)));
-
          } else {
-            t0 = newTemp(Ity_I32);
-            assign(t0, binop(Iop_Add32, getIReg(rs), getIReg(rt)));
-
             store(mkexpr(t0), getFReg(fs));
          }
          break;
       }
       case 0x9: {  /* Store Doubleword Indexed from Floating Point - SDXC1 */
-         DIP("sdc1 f%u, %u(%u)", ft, imm, rs);
-         if (fp_mode64) {
-            t0 = newTemp(ty);
-            assign(t0, binop(mode64 ? Iop_Add64 : Iop_Add32, getIReg(rs),
-                             getIReg(rt)));
-            store(mkexpr(t0), getFReg(fs));
-         } else {
-            t0 = newTemp(Ity_I32);
-            assign(t0, binop(Iop_Add32, getIReg(rs), getIReg(rt)));
-
-            t1 = newTemp(Ity_I32);
-            assign(t1, binop(Iop_Add32, mkexpr(t0), mkU32(4)));
-
-#if defined (_MIPSEL)
-            store(mkexpr(t0), getFReg(fs));
-            store(mkexpr(t1), getFReg(fs + 1));
-#elif defined (_MIPSEB)
-            store(mkexpr(t0), getFReg(fs + 1));
-            store(mkexpr(t1), getFReg(fs));
-#endif
-         }
+         DIP("sdxc1 f%u, r%u(r%u)", fs, rt, rs);
+         t0 = newTemp(ty);
+         assign(t0, binop(mode64 ? Iop_Add64 : Iop_Add32, getIReg(rs),
+                          getIReg(rt)));
+         store(mkexpr(t0), getDReg(fs));
          break;
       }
       case 0xD:  /* Store Doubleword Indexed Unaligned from Floating Point -
                     SUXC1; MIPS64 MIPS32r2 */
          DIP("suxc1 f%u, r%u(r%u)", fd, rt, rs);
-         t0 = newTemp(Ity_I64);
-         t1 = newTemp(Ity_I64);
-         assign(t0, binop(Iop_Add64, getIReg(rs), getIReg(rt)));
-         assign(t1, binop(Iop_And64, mkexpr(t0), mkU64(0xfffffffffffffff8ULL)));
-         store(mkexpr(t1), getFReg(fs));
+         if ((mode64 || VEX_MIPS_CPU_HAS_MIPS32R2(archinfo->hwcaps))
+             && fp_mode64) {
+            t0 = newTemp(ty);
+            t1 = newTemp(ty);
+            assign(t0, binop(mode64 ? Iop_Add64 : Iop_Add32,
+                             getIReg(rs), getIReg(rt)));
+            assign(t1, binop(mode64 ? Iop_And64 : Iop_And32,
+                             mkexpr(t0),
+                             mode64 ? mkU64(0xfffffffffffffff8ULL)
+                                    : mkU32(0xfffffff8ULL)));
+            store(mkexpr(t1), getFReg(fs));
+         } else {
+            ILLEGAL_INSTRUCTON;
+         }
          break;
 
       case 0x0F: {
@@ -15116,41 +15091,31 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
             goto decode_failure;;
          }
          break;
-      case 0x3B: {  /* RDHWR */
+      case 0x3B: /* RDHWR */
          DIP("rdhwr r%u, r%u", rt, rd);
+         if (VEX_MIPS_CPU_HAS_MIPS32R2(archinfo->hwcaps) ||
+             (VEX_MIPS_COMP_ID(archinfo->hwcaps) == VEX_PRID_COMP_BROADCOM)) {
             if (rd == 29) {
                putIReg(rt, getULR());
-#if defined(__mips__) && ((defined(__mips_isa_rev) && __mips_isa_rev >= 2))
-            } else if (rd == 1
+            } else if (rd <= 3
                        || (rd == 31
                            && VEX_MIPS_COMP_ID(archinfo->hwcaps)
                                                     == VEX_PRID_COMP_CAVIUM)) {
-               if (mode64) {
-                  IRTemp   val  = newTemp(Ity_I64);
-                  IRExpr** args = mkIRExprVec_2 (mkU64(rt), mkU64(rd));
-                  IRDirty *d = unsafeIRDirty_1_N(val,
-                                                 0,
-                                                 "mips64_dirtyhelper_rdhwr",
-                                                 &mips64_dirtyhelper_rdhwr,
-                                                 args);
-                  stmt(IRStmt_Dirty(d));
-                  putIReg(rt, mkexpr(val));
-               } else {
-                  IRTemp   val  = newTemp(Ity_I32);
-                  IRExpr** args = mkIRExprVec_2 (mkU32(rt), mkU32(rd));
-                  IRDirty *d = unsafeIRDirty_1_N(val,
-                                                 0,
-                                                 "mips32_dirtyhelper_rdhwr",
-                                                 &mips32_dirtyhelper_rdhwr,
-                                                 args);
-                  stmt(IRStmt_Dirty(d));
-                  putIReg(rt, mkexpr(val));
-               }
-#endif
+               IRExpr** arg = mkIRExprVec_1(mkU32(rd));
+               IRTemp   val  = newTemp(ty);
+               IRDirty *d = unsafeIRDirty_1_N(val,
+                                              0,
+                                              "mips_dirtyhelper_rdhwr",
+                                              &mips_dirtyhelper_rdhwr,
+                                              arg);
+               stmt(IRStmt_Dirty(d));
+               putIReg(rt, mkexpr(val));
             } else
                goto decode_failure;
-            break;
+         } else {
+            ILLEGAL_INSTRUCTON;
          }
+         break;
       case 0x04:  /* INS */
          msb = get_msb(cins);
          lsb = get_lsb(cins);
@@ -17010,64 +16975,106 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
       putIReg(rt, mkWidenFrom32(ty, load(Ity_I32, mkexpr(t1)), False));
       break;
 
-   case 0x30:  /* LL / LWC0 */
+   case 0x30:  /* LL */
       DIP("ll r%u, %u(r%u)", rt, imm, rs);
       LOAD_STORE_PATTERN;
-
-      t2 = newTemp(Ity_I32);
-#if defined (_MIPSEL)
-      stmt(IRStmt_LLSC(Iend_LE, t2, mkexpr(t1), NULL /* this is a load */ ));
-#elif defined (_MIPSEB)
-      stmt(IRStmt_LLSC(Iend_BE, t2, mkexpr(t1), NULL /* this is a load */ ));
-#endif
-      if (mode64)
-         putIReg(rt, unop(Iop_32Sto64, mkexpr(t2)));
-      else
+      if (abiinfo->guest__use_fallback_LLSC) {
+         t2 = newTemp(ty);
+         assign(t2, mkWidenFrom32(ty, load(Ity_I32, mkexpr(t1)), True));
+         putLLaddr(mkexpr(t1));
+         putLLdata(mkexpr(t2));
          putIReg(rt, mkexpr(t2));
+      } else {
+         t2 = newTemp(Ity_I32);
+         stmt(IRStmt_LLSC(MIPS_IEND, t2, mkexpr(t1), NULL));
+         putIReg(rt, mkWidenFrom32(ty, mkexpr(t2), True));
+      }
       break;
 
    case 0x34:  /* Load Linked Doubleword - LLD; MIPS64 */
       DIP("lld r%u, %u(r%u)", rt, imm, rs);
-      LOAD_STORE_PATTERN;
-
-      t2 = newTemp(Ity_I64);
-#if defined (_MIPSEL)
-      stmt(IRStmt_LLSC
-           (Iend_LE, t2, mkexpr(t1), NULL /* this is a load */ ));
-#elif defined (_MIPSEB)
-      stmt(IRStmt_LLSC
-           (Iend_BE, t2, mkexpr(t1), NULL /* this is a load */ ));
-#endif
-
-      putIReg(rt, mkexpr(t2));
+      if (mode64) {
+         LOAD_STORE_PATTERN;
+         t2 = newTemp(Ity_I64);
+         if (abiinfo->guest__use_fallback_LLSC) {
+            assign(t2, load(Ity_I64, mkexpr(t1)));
+            putLLaddr(mkexpr(t1));
+            putLLdata(mkexpr(t2));
+         } else {
+            stmt(IRStmt_LLSC(MIPS_IEND, t2, mkexpr(t1), NULL));
+         }
+         putIReg(rt, mkexpr(t2));
+      } else {
+         ILLEGAL_INSTRUCTON;
+      }
       break;
 
-   case 0x38:  /* SC / SWC0 */
+   case 0x38:  /* SC */
       DIP("sc r%u, %u(r%u)", rt, imm, rs);
-      LOAD_STORE_PATTERN;
-
       t2 = newTemp(Ity_I1);
-#if defined (_MIPSEL)
-      stmt(IRStmt_LLSC(Iend_LE, t2, mkexpr(t1), mkNarrowTo32(ty, getIReg(rt))));
-#elif defined (_MIPSEB)
-      stmt(IRStmt_LLSC(Iend_BE, t2, mkexpr(t1), mkNarrowTo32(ty, getIReg(rt))));
-#endif
+      LOAD_STORE_PATTERN;
+      if (abiinfo->guest__use_fallback_LLSC) {
+         t3 = newTemp(Ity_I32);
+         assign(t2, binop(mode64 ? Iop_CmpNE64 : Iop_CmpNE32,
+                          mkexpr(t1), getLLaddr()));
+         assign(t3, mkNarrowTo32(ty, getIReg(rt)));
+         putLLaddr(LLADDR_INVALID);
+         putIReg(rt, getIReg(0));
 
-      putIReg(rt, unop(mode64 ? Iop_1Uto64 : Iop_1Uto32, mkexpr(t2)));
+         mips_next_insn_if(mkexpr(t2));
+
+         t4 = newTemp(Ity_I32);
+         t5 = newTemp(Ity_I32);
+
+         assign(t5, mkNarrowTo32(ty, getLLdata()));
+
+         stmt(IRStmt_CAS(mkIRCAS(IRTemp_INVALID, t4, /* old_mem */
+              MIPS_IEND, mkexpr(t1),                 /* addr */
+              NULL, mkexpr(t5),                      /* expected value */
+              NULL, mkexpr(t3)                       /* new value */)));
+
+         putIReg(rt, unop(mode64 ? Iop_1Uto64 : Iop_1Uto32,
+                          binop(Iop_CmpEQ32, mkexpr(t4), mkexpr(t5))));
+      } else {
+         stmt(IRStmt_LLSC(MIPS_IEND, t2, mkexpr(t1),
+                          mkNarrowTo32(ty, getIReg(rt))));
+         putIReg(rt, unop(mode64 ? Iop_1Uto64 : Iop_1Uto32, mkexpr(t2)));
+      }
       break;
 
    case 0x3C:  /* Store Conditional Doubleword - SCD; MIPS64 */
-      DIP("sdc r%u, %u(r%u)", rt, imm, rs);
-      LOAD_STORE_PATTERN;
+      DIP("scd r%u, %u(r%u)", rt, imm, rs);
+      if (mode64) {
+         t2 = newTemp(Ity_I1);
+         LOAD_STORE_PATTERN;
+         if (abiinfo->guest__use_fallback_LLSC) {
+            t3 = newTemp(Ity_I64);
+            assign(t2, binop(Iop_CmpNE64, mkexpr(t1), getLLaddr()));
+            assign(t3, getIReg(rt));
+            putLLaddr(LLADDR_INVALID);
+            putIReg(rt, getIReg(0));
 
-      t2 = newTemp(Ity_I1);
-#if defined (_MIPSEL)
-      stmt(IRStmt_LLSC(Iend_LE, t2, mkexpr(t1), getIReg(rt)));
-#elif defined (_MIPSEB)
-      stmt(IRStmt_LLSC(Iend_BE, t2, mkexpr(t1), getIReg(rt)));
-#endif
+            mips_next_insn_if(mkexpr(t2));
 
-      putIReg(rt, unop(Iop_1Uto64, mkexpr(t2)));
+            t4 = newTemp(Ity_I64);
+            t5 = newTemp(Ity_I64);
+
+            assign(t5, getLLdata());
+
+            stmt(IRStmt_CAS(mkIRCAS(IRTemp_INVALID, t4, /* old_mem */
+                 MIPS_IEND, mkexpr(t1),                 /* addr */
+                 NULL, mkexpr(t5),                      /* expected value */
+                 NULL, mkexpr(t3)                       /* new value */)));
+
+            putIReg(rt, unop(Iop_1Uto64,
+                             binop(Iop_CmpEQ64, mkexpr(t4), mkexpr(t5))));
+         } else {
+            stmt(IRStmt_LLSC(MIPS_IEND, t2, mkexpr(t1), getIReg(rt)));
+            putIReg(rt, unop(Iop_1Uto64, mkexpr(t2)));
+         }
+      } else {
+         ILLEGAL_INSTRUCTON;
+      }
       break;
 
    case 0x37:  /* Load Doubleword - LD; MIPS64 */
@@ -17236,7 +17243,10 @@ static DisResult disInstr_MIPS_WRK ( Bool(*resteerOkFn) (/*opaque */void *,
          break;
       case Dis_ResteerU:
       case Dis_ResteerC:
-         putPC(mkU32(dres.continueAt));
+         if (mode64)
+            putPC(mkU64(dres.continueAt));
+         else
+            putPC(mkU32(dres.continueAt));
          break;
       case Dis_StopHere:
          break;
@@ -17289,10 +17299,9 @@ DisResult disInstr_MIPS( IRSB*        irsb_IN,
    vassert(guest_arch == VexArchMIPS32 || guest_arch == VexArchMIPS64);
 
    mode64 = guest_arch != VexArchMIPS32;
-#if (__mips_fpr==64)
-   fp_mode64 = ((VEX_MIPS_REV(archinfo->hwcaps) == VEX_PRID_CPU_32FPR)
-                || guest_arch == VexArchMIPS64);
-#endif
+   fp_mode64 = abiinfo->guest_mips_fp_mode64;
+
+   vassert(VEX_MIPS_HOST_FP_MODE(archinfo->hwcaps) >= fp_mode64);
 
    guest_code = guest_code_IN;
    irsb = irsb_IN;

@@ -8,7 +8,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2006-2015 OpenWorks LLP
+   Copyright (C) 2006-2017 OpenWorks LLP
       info@open-works.co.uk
 
    This program is free software; you can redistribute it and/or
@@ -39,11 +39,12 @@
    describing the kernel interface, so this file is nearly empty. */
 
 
-/* ppc32/64-linux determines page size at startup, hence m_vki is
-   the logical place to store that info. */
+/* ppc32/64, arm64 and mips32/64 (linux) determine page size at startup,
+   hence m_vki is the logical place to store that info. */
 
 #if defined(VGP_ppc32_linux) || defined(VGP_ppc64be_linux) \
-    || defined(VGP_ppc64le_linux) || defined(VGP_arm64_linux)
+    || defined(VGP_ppc64le_linux) || defined(VGP_arm64_linux) \
+    || defined(VGP_mips32_linux)  || defined(VGP_mips64_linux)
 unsigned long VKI_PAGE_SHIFT = 12;
 unsigned long VKI_PAGE_SIZE  = 1UL << 12;
 #endif

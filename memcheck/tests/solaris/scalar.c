@@ -1,6 +1,7 @@
 /* Basic syscall test, see memcheck/tests/x86-linux/scalar.c for more info. */
 
 #include "scalar.h"
+#include "config.h"
 
 #include <bsm/audit.h>
 #include <nfs/nfs.h>
@@ -8,8 +9,13 @@
 #include <sys/acl.h>
 #include <sys/door.h>
 #include <sys/fcntl.h>
-#include <sys/lwp.h>
+#include <sys/fstyp.h>
+#include <sys/lgrp_user.h>
+#if defined(HAVE_SYS_LGRP_USER_IMPL_H)
+#include <sys/lgrp_user_impl.h>
+#endif /* HAVE_SYS_LGRP_USER_IMPL_H */
 #include <sys/mman.h>
+#include <sys/modctl.h>
 #include <sys/mount.h>
 #include <sys/port_impl.h>
 #include <sys/priocntl.h>
@@ -306,6 +312,13 @@ static void sys_fcntl2(void)
 __attribute__((noinline))
 static void sys_fcntl3(void)
 {
+   GO(SYS_fcntl, "(DUPFD_CLOEXEC) 3s 0m");
+   SY(SYS_fcntl, x0 - 1, x0 + F_DUPFD_CLOEXEC, x0); FAILx(EBADF);
+}
+
+__attribute__((noinline))
+static void sys_fcntl4(void)
+{
    GO(SYS_fcntl, "(GETLK) 3s 5m");
    SY(SYS_fcntl, x0 - 1, x0 + F_GETLK, x0); FAILx(EBADF);
 }
@@ -461,14 +474,35 @@ __attribute__((noinline))
 static void sys_ucredsys(void)
 {
    GO(SYS_ucredsys, "(UCREDSYS_UCREDGET) 3s 1m");
-   SY(SYS_ucredsys, x0 + 0, x0, x0 + 1 ); FAIL;
+   SY(SYS_ucredsys, x0 + 0, x0, x0 + 1); FAIL;
 }
 
 __attribute__((noinline))
 static void sys_ucredsys2(void)
 {
    GO(SYS_ucredsys, "(UCREDSYS_GETPEERUCRED) 3s 1m");
-   SY(SYS_ucredsys, x0 + 1, x0 - 1, x0 + 1 ); FAILx(EBADF);
+   SY(SYS_ucredsys, x0 + 1, x0 - 1, x0 + 1); FAILx(EBADF);
+}
+
+__attribute__((noinline))
+static void sys_sysfs(void)
+{
+   GO(SYS_sysfs, "(GETFSIND) 2s 1m");
+   SY(SYS_sysfs, x0 + GETFSIND, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_sysfs2(void)
+{
+   GO(SYS_sysfs, "(GETFSTYP) 3s 1m");
+   SY(SYS_sysfs, x0 + GETFSTYP, x0, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_sysfs3(void)
+{
+   GO(SYS_sysfs, "(GETNFSTYP) 1s 0m");
+   SY(SYS_sysfs, x0 + GETNFSTYP); SUCC;
 }
 
 __attribute__((noinline))
@@ -648,6 +682,76 @@ static int sys_uname2(void)
    if (name.version[version_len + 2] != ' ') x = -7; else x = -8;
    if (name.machine[machine_len + 2] != ' ') x = -9; else x = -10;
    return x;
+}
+
+__attribute__((noinline))
+static void sys_modctl(void)
+{
+   GO(SYS_modctl, "(MODLOAD) 4s 1m");
+   SY(SYS_modctl, x0 + MODLOAD, x0 + 1, x0 - 1, x0 - 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_modctl2(void)
+{
+   GO(SYS_modctl, "(MODUNLOAD) 2s 0m");
+   SY(SYS_modctl, x0 + MODUNLOAD, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_modctl3(void)
+{
+   GO(SYS_modctl, "(MODINFO) 3s 4m");
+   SY(SYS_modctl, x0 + MODINFO, x0 + 1, x0 - 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_lgrpsys(void)
+{
+   GO(SYS_lgrpsys, "(LGRP_SYS_MEMINFO) 3s 1m");
+   SY(SYS_lgrpsys, x0 + LGRP_SYS_MEMINFO, x0 + 0, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_lgrpsys2(void)
+{
+   GO(SYS_lgrpsys, "(LGRP_SYS_MEMINFO) 3s 1m");
+   SY(SYS_lgrpsys, x0 + LGRP_SYS_MEMINFO, x0 + 1, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_lgrpsys3(void)
+{
+   meminfo_t minfo;
+   minfo.mi_inaddr = (void *)(x0 + 1);
+   minfo.mi_info_req = (void *)(x0 + 1);
+   minfo.mi_info_count = x0 + 1;
+   minfo.mi_outdata = (void *)(x0 + 1);
+   minfo.mi_validity = (void *)(x0 + 1);
+
+   GO(SYS_lgrpsys, "(LGRP_SYS_MEMINFO) 4s 4m");
+   SY(SYS_lgrpsys, x0 + LGRP_SYS_MEMINFO, x0 + 1, x0 + &minfo); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_lgrpsys4(void)
+{
+   GO(SYS_lgrpsys, "(LGRP_SYS_GENERATION) 2s 0m");
+   SY(SYS_lgrpsys, x0 + LGRP_SYS_GENERATION, x0 + 0); SUCC;
+}
+
+__attribute__((noinline))
+static void sys_lgrpsys5(void)
+{
+   GO(SYS_lgrpsys, "(LGRP_SYS_VERSION) 2s 0m");
+   SY(SYS_lgrpsys, x0 + LGRP_SYS_VERSION, x0 + 0); SUCC;
+}
+
+__attribute__((noinline))
+static void sys_lgrpsys6(void)
+{
+   GO(SYS_lgrpsys, "(LGRP_SYS_SNAPSHOT) 3s 1m");
+   SY(SYS_lgrpsys, x0 + LGRP_SYS_SNAPSHOT, x0 + 10, x0 + 1); FAIL;
 }
 
 __attribute__((noinline))
@@ -950,61 +1054,47 @@ static void sys_auditsys13(void)
 __attribute__((noinline))
 static void sys_auditsys14(void)
 {
-   GO(SYS_auditsys, "(BSM_AUDITCTL,A_GETSTAT) 3s 1m");
-   SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_GETSTAT, x0); FAIL;
-}
-
-__attribute__((noinline))
-static void sys_auditsys15(void)
-{
-   GO(SYS_auditsys, "(BSM_AUDITCTL,A_SETSTAT) 3s 1m");
-   SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_SETSTAT, x0); FAIL;
-}
-
-__attribute__((noinline))
-static void sys_auditsys16(void)
-{
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_SETUMASK) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_SETUMASK, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys17(void)
+static void sys_auditsys15(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_SETSMASK) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_SETSMASK, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys18(void)
+static void sys_auditsys16(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_GETCOND) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_GETCOND, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys19(void)
+static void sys_auditsys17(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_SETCOND) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_SETCOND, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys20(void)
+static void sys_auditsys18(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_GETCLASS) 3s 0m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_GETCLASS, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys21(void)
+static void sys_auditsys19(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_SETCLASS) 3s 0m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_SETCLASS, x0 + 1); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys22(void)
+static void sys_auditsys20(void)
 {
    au_evclass_map_t classmap;
    classmap.ec_number = x0;
@@ -1015,21 +1105,21 @@ static void sys_auditsys22(void)
 }
 
 __attribute__((noinline))
-static void sys_auditsys23(void)
+static void sys_auditsys21(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_GETPINFO) 3s 0m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_GETPINFO, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys24(void)
+static void sys_auditsys22(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_SETPMASK) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_SETPMASK, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys25(void)
+static void sys_auditsys23(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_GETPINFO_ADDR) 4s 0m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_GETPINFO_ADDR, x0,
@@ -1037,49 +1127,49 @@ static void sys_auditsys25(void)
 }
 
 __attribute__((noinline))
-static void sys_auditsys26(void)
+static void sys_auditsys24(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_GETKAUDIT) 4s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_GETKAUDIT, x0, x0 + 1); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys27(void)
+static void sys_auditsys25(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_SETKAUDIT) 4s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_SETKAUDIT, x0, x0 + 1); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys28(void)
+static void sys_auditsys26(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_GETAMASK) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_GETAMASK, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys29(void)
+static void sys_auditsys27(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITCTL,A_SETAMASK) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_AUDITCTL, x0 + A_SETAMASK, x0); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys30(void)
+static void sys_auditsys28(void)
 {
    GO(SYS_auditsys, "(BSM_GETAUDIT_ADDR) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_GETAUDIT_ADDR, x0 + 1, x0 + 1); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys31(void)
+static void sys_auditsys29(void)
 {
    GO(SYS_auditsys, "(BSM_SETAUDIT_ADDR) 3s 1m");
    SY(SYS_auditsys, x0 + BSM_SETAUDIT_ADDR, x0, x0 + 1); FAIL;
 }
 
 __attribute__((noinline))
-static void sys_auditsys32(void)
+static void sys_auditsys30(void)
 {
    GO(SYS_auditsys, "(BSM_AUDITDOOR) 2s 0m");
    SY(SYS_auditsys, x0 + BSM_AUDITDOOR, x0); FAIL;
@@ -1188,6 +1278,109 @@ static void sys_door5(void)
    SY(SYS_door, x0, x0 + &params, x0, x0, x0, x0 + DOOR_CALL); FAIL;
 }
 
+__attribute__((noinline))
+static void sys_door6(void)
+{
+   GO(SYS_door, "(DOOR_SETPARAM) 4s 0m");
+   SY(SYS_door, x0, x0 - 1, x0 + 1, x0, x0, x0 + DOOR_SETPARAM); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset(void)
+{
+   GO(SYS_pset, "(CREATE) 2s 1m");
+   SY(SYS_pset, x0 + PSET_CREATE, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset2(void)
+{
+   GO(SYS_pset, "(DESTROY) 2s 0m");
+   SY(SYS_pset, x0 + PSET_DESTROY, x0); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset3(void)
+{
+   GO(SYS_pset, "(ASSIGN) 4s 1m");
+   SY(SYS_pset, x0 + PSET_ASSIGN, x0 + 1, x0 + 1, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset4(void)
+{
+   GO(SYS_pset, "(INFO) 5s 3m");
+   SY(SYS_pset, x0 + PSET_INFO, x0 + 1, x0 + 1, x0 + 1, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset5(void)
+{
+   int type;
+   uint_t numcpus = x0 + 1;
+
+   GO(SYS_pset, "(INFO) 5s 1m");
+   SY(SYS_pset, x0 + PSET_INFO, x0 + 1, x0 + &type, x0 + &numcpus,
+      x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset6(void)
+{
+   GO(SYS_pset, "(BIND) 5s 1m");
+   SY(SYS_pset, x0 + PSET_BIND, x0 + 1, x0 + 1, x0 + 1, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset7(void)
+{
+   GO(SYS_pset, "(BIND_LWP) 5s 1m");
+   SY(SYS_pset, x0 + PSET_BIND_LWP, x0 + 1, x0 + 1, x0 + 1, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset8(void)
+{
+   GO(SYS_pset, "(GETLOADAVG) 4s 1m");
+   SY(SYS_pset, x0 + PSET_GETLOADAVG, x0 + 1, x0 + 1, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset9(void)
+{
+   GO(SYS_pset, "(LIST) 3s 1m");
+   SY(SYS_pset, x0 + PSET_LIST, x0 + 1, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset10(void)
+{
+   uint_t numpsets = x0 + 1;
+
+   GO(SYS_pset, "(LIST) 3s 1m");
+   SY(SYS_pset, x0 + PSET_LIST, x0 + 1, x0 + &numpsets);
+}
+
+__attribute__((noinline))
+static void sys_pset11(void)
+{
+   GO(SYS_pset, "(SETATTR) 3s 0m");
+   SY(SYS_pset, x0 + PSET_SETATTR, x0, x0); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset12(void)
+{
+   GO(SYS_pset, "(GETATTR) 3s 1m");
+   SY(SYS_pset, x0 + PSET_GETATTR, x0, x0 + 1); FAIL;
+}
+
+__attribute__((noinline))
+static void sys_pset13(void)
+{
+   GO(SYS_pset, "(ASSIGN_FORCED) 4s 1m");
+   SY(SYS_pset, x0 + PSET_ASSIGN_FORCED, x0 + 1, x0 + 1, x0 + 1); FAIL;
+}
 
 __attribute__((noinline))
 static void sys_lwp_rwlock(void)
@@ -1622,6 +1815,7 @@ int main(void)
    sys_fcntl();
    sys_fcntl2();
    sys_fcntl3();
+   sys_fcntl4();
 
    /* SYS_ulimit                 63 */
    /* XXX Missing wrapper. */
@@ -1705,7 +1899,9 @@ int main(void)
    sys_ucredsys2();
 
    /* SYS_sysfs                  84 */
-   /* XXX Missing wrapper. */
+   sys_sysfs();
+   sys_sysfs2();
+   sys_sysfs3();
 
    /* SYS_getmsg                 85 */
    GO(SYS_getmsg, "4s 1m");
@@ -1743,7 +1939,8 @@ int main(void)
    SY(SYS_sigprocmask, x0, x0 + 1, x0 + 1); FAILx(EFAULT);
 
    /* SYS_sigsuspend             96 */
-   /* XXX Missing wrapper. */
+   GO(SYS_sigsuspend, "1s 1m");
+   SY(SYS_sigsuspend, x0 + 1); FAILx(EFAULT);
 
    /* SYS_sigaltstack            97 */
    GO(SYS_sigaltstack, "2s 2m");
@@ -1791,7 +1988,8 @@ int main(void)
    SY(SYS_waitid, x0 - 1, x0, x0, x0); FAIL;
 
    /* SYS_sigsendsys            108 */
-   /* XXX Missing wrapper. */
+   GO(SYS_sigsendsys, "2s 1m");
+   SY(SYS_sigsendsys, x0 - 1, x0); FAIL;
 
    /* SYS_hrtsys                109 */
    /* XXX Missing wrapper. */
@@ -1843,7 +2041,8 @@ int main(void)
    /* XXX Missing wrapper. */
 
    /* SYS_fchdir                120 */
-   /* XXX Missing wrapper. */
+   GO(SYS_fchdir, "1s 0m");
+   SY(SYS_fchdir, x0 - 1); FAILx(EBADF);
 
    /* SYS_readv                 121 */
    GO(SYS_readv, "3s 1m");
@@ -1939,7 +2138,9 @@ int main(void)
    /* XXX Missing wrapper. */
 
    /* SYS_modctl                152 */
-   /* XXX Missing wrapper. */
+   sys_modctl();
+   sys_modctl2();
+   sys_modctl3();
 
    /* SYS_fchroot               153 */
    GO(SYS_fchroot, "1s 0m");
@@ -1992,14 +2193,7 @@ int main(void)
    SY(SYS_lwp_sigmask, x0, x0, x0, x0, x0); FAIL;
 
    /* SYS_lwp_private           166 */
-   GO(SYS_lwp_private, "3s 1m");
-#if defined(__i386)
-   SY(SYS_lwp_private, x0 + _LWP_GETPRIVATE, x0 + _LWP_GSBASE, x0); FAIL;
-#elif defined(__amd64)
-   SY(SYS_lwp_private, x0 + _LWP_GETPRIVATE, x0 + _LWP_FSBASE, x0); FAIL;
-#else
-#error Unsupported platform
-#endif
+   /* Tested in amd64-solaris/scalar and x86-solaris/scalar */
 
    /* SYS_lwp_wait              167 */
    GO(SYS_lwp_wait, "2s 1m");
@@ -2010,10 +2204,12 @@ int main(void)
    SY(SYS_lwp_mutex_wakeup, x0, x0); FAIL;
 
    /* SYS_lwp_cond_wait         170 */
-   /* XXX Missing wrapper. */
+   GO(SYS_lwp_cond_wait, "4s 5m");
+   SY(SYS_lwp_cond_wait, x0 + 1, x0 + 1, x0 + 1, x0); FAIL;
 
    /* SYS_lwp_cond_signal       171 */
-   /* XXX Missing wrapper. */
+   GO(SYS_lwp_cond_signal, "1s 2m");
+   SY(SYS_lwp_cond_signal, x0); FAIL;
 
    /* SYS_lwp_cond_broadcast    172 */
    GO(SYS_lwp_cond_broadcast, "1s 2m");
@@ -2043,7 +2239,12 @@ int main(void)
    /* XXX Missing wrapper. */
 
    /* SYS_lgrpsys               180 */
-   /* XXX Missing wrapper. */
+   sys_lgrpsys();
+   sys_lgrpsys2();
+   sys_lgrpsys3();
+   sys_lgrpsys4();
+   sys_lgrpsys5();
+   sys_lgrpsys6();
 
    /* SYS_rusagesys             181 */
    sys_rusagesys();
@@ -2116,8 +2317,6 @@ int main(void)
    sys_auditsys28();
    sys_auditsys29();
    sys_auditsys30();
-   sys_auditsys31();
-   sys_auditsys32();
 
    /* SYS_processor_bind        187 */
    /* XXX Missing wrapper. */
@@ -2183,6 +2382,7 @@ int main(void)
    sys_door3();
    sys_door4();
    sys_door5();
+   sys_door6();
    /* XXX Additional sys_door variants still unimplemented. */
 
    /* SYS_setreuid              202 */
@@ -2204,7 +2404,19 @@ int main(void)
    SY(SYS_schedctl); SUCC;
 
    /* SYS_pset                  207 */
-   /* XXX Missing wrapper. */
+   sys_pset();
+   sys_pset2();
+   sys_pset3();
+   sys_pset4();
+   sys_pset5();
+   sys_pset6();
+   sys_pset7();
+   sys_pset8();
+   sys_pset9();
+   sys_pset10();
+   sys_pset11();
+   sys_pset12();
+   sys_pset13();
 
    /* SYS_sparc_utrap_install   208 */
    /* XXX Missing wrapper. */

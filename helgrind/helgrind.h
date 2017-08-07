@@ -11,7 +11,7 @@
    This file is part of Helgrind, a Valgrind tool for detecting errors
    in threaded programs.
 
-   Copyright (C) 2007-2015 OpenWorks LLP
+   Copyright (C) 2007-2017 OpenWorks LLP
       info@open-works.co.uk
 
    Redistribution and use in source and binary forms, with or without
@@ -133,7 +133,8 @@ typedef
       _VG_USERREQ__HG_PTHREAD_COND_SIGNAL_POST,   /* pth_cond_t* */
       _VG_USERREQ__HG_PTHREAD_COND_BROADCAST_POST,/* pth_cond_t* */
       _VG_USERREQ__HG_RTLD_BIND_GUARD,            /* int flags */
-      _VG_USERREQ__HG_RTLD_BIND_CLEAR             /* int flags */
+      _VG_USERREQ__HG_RTLD_BIND_CLEAR,            /* int flags */
+      _VG_USERREQ__HG_GNAT_DEPENDENT_MASTER_JOIN  /* void*d, void*m */
    } Vg_TCheckClientRequest;
 
 
@@ -166,7 +167,7 @@ typedef
       _arg1 = (long int)(_arg1F);                        \
       VALGRIND_DO_CLIENT_REQUEST_STMT(                   \
                                  (_creqF),               \
-                                 _arg1, 0,0,0,0,0);      \
+                                 _arg1, 0,0,0,0);        \
    } while (0)
 
 #define DO_CREQ_W_W(_resF, _dfltF, _creqF, _ty1F,_arg1F) \
@@ -177,7 +178,7 @@ typedef
       _qzz_res = VALGRIND_DO_CLIENT_REQUEST_EXPR(        \
                                  (_dfltF),               \
                                  (_creqF),               \
-                                 _arg1, 0,0,0,0,0);      \
+                                 _arg1, 0,0,0,0);        \
       _resF = _qzz_res;                                  \
    } while (0)
 
@@ -190,7 +191,7 @@ typedef
       _arg2 = (long int)(_arg2F);                        \
       VALGRIND_DO_CLIENT_REQUEST_STMT(                   \
                                  (_creqF),               \
-                                 _arg1,_arg2,0,0,0,0);   \
+                                 _arg1,_arg2,0,0,0);     \
    } while (0)
 
 #define DO_CREQ_v_WWW(_creqF, _ty1F,_arg1F,              \
@@ -205,8 +206,7 @@ typedef
       _arg3 = (long int)(_arg3F);                        \
       VALGRIND_DO_CLIENT_REQUEST_STMT(                   \
                                  (_creqF),               \
-                                 _arg1,_arg2,_arg3,0,0,  \
-                                 0);                     \
+                                 _arg1,_arg2,_arg3,0,0); \
    } while (0)
 
 #define DO_CREQ_W_WWW(_resF, _dfltF, _creqF, _ty1F,_arg1F, \
@@ -221,8 +221,7 @@ typedef
       _qzz_res = VALGRIND_DO_CLIENT_REQUEST_EXPR(        \
                                  (_dfltF),               \
                                  (_creqF),               \
-                                 _arg1,_arg2,_arg3,0,0,  \
-                                 0);                     \
+                                 _arg1,_arg2,_arg3,0,0); \
       _resF = _qzz_res;                                  \
    } while (0)
 
@@ -425,6 +424,37 @@ typedef
                     unsigned long,(zznbytes));               \
       _res;                                                  \
    }))
+
+/* End-user request for Ada applications compiled with GNAT.
+   Helgrind understands the Ada concept of Ada task dependencies and
+   terminations. See Ada Reference Manual section 9.3 "Task Dependence 
+   - Termination of Tasks".
+   However, in some cases, the master of (terminated) tasks completes
+   only when the application exits. An example of this is dynamically
+   allocated tasks with an access type defined at Library Level.
+   By default, the state of such tasks in Helgrind will be 'exited but
+   join not done yet'. Many tasks in such a state are however causing
+   Helgrind CPU and memory to increase significantly.
+   VALGRIND_HG_GNAT_DEPENDENT_MASTER_JOIN can be used to indicate
+   to Helgrind that a not yet completed master has however already
+   'seen' the termination of a dependent : this is conceptually the
+   same as a pthread_join and causes the cleanup of the dependent
+   as done by Helgrind when a master completes.
+   This allows to avoid the overhead in helgrind caused by such tasks.
+   A typical usage for a master to indicate it has done conceptually a join
+   with a dependent task before the master completes is:
+      while not Dep_Task'Terminated loop
+         ... do whatever to wait for Dep_Task termination.
+      end loop;
+      VALGRIND_HG_GNAT_DEPENDENT_MASTER_JOIN
+        (Dep_Task'Identity,
+         Ada.Task_Identification.Current_Task);
+    Note that VALGRIND_HG_GNAT_DEPENDENT_MASTER_JOIN should be a binding
+    to a C function built with the below macro. */
+#define VALGRIND_HG_GNAT_DEPENDENT_MASTER_JOIN(_qzz_dep, _qzz_master) \
+   DO_CREQ_v_WW(_VG_USERREQ__HG_GNAT_DEPENDENT_MASTER_JOIN,           \
+                void*,(_qzz_dep),                                     \
+                void*,(_qzz_master))
 
 /*----------------------------------------------------------------*/
 /*---                                                          ---*/

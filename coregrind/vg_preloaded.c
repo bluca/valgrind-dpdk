@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -47,28 +47,46 @@
 #include "pub_core_debuginfo.h"  // Needed for pub_core_redir.h
 #include "pub_core_redir.h"      // For VG_NOTIFY_ON_LOAD
 
-#if defined(VGO_linux)
+#if defined(VGO_linux) || defined(VGO_solaris)
 
 /* ---------------------------------------------------------------------
-   Hook for running __libc_freeres once the program exits.
+   Hook for running __gnu_cxx::__freeres() and __libc_freeres() once
+   the program exits.
    ------------------------------------------------------------------ */
 
-void VG_NOTIFY_ON_LOAD(freeres)( void );
-void VG_NOTIFY_ON_LOAD(freeres)( void )
+void VG_NOTIFY_ON_LOAD(freeres)(Vg_FreeresToRun to_run);
+void VG_NOTIFY_ON_LOAD(freeres)(Vg_FreeresToRun to_run)
 {
-#  if !defined(__UCLIBC__) \
+#  if !defined(__UCLIBC__) && !defined(MUSL_LIBC) \
       && !defined(VGPV_arm_linux_android) \
       && !defined(VGPV_x86_linux_android) \
       && !defined(VGPV_mips32_linux_android) \
       && !defined(VGPV_arm64_linux_android)
+
+   /* g++ mangled __gnu_cxx::__freeres yields -> _ZN9__gnu_cxx9__freeresEv */
+   extern void _ZN9__gnu_cxx9__freeresEv(void) __attribute__((weak));
+   if (((to_run & VG_RUN__GNU_CXX__FREERES) != 0) &&
+       (_ZN9__gnu_cxx9__freeresEv != NULL)) {
+      _ZN9__gnu_cxx9__freeresEv();
+   }
+
+#  if defined(VGO_linux)
+   /* __libc_freeres() not yet available on Solaris. */
    extern void __libc_freeres(void);
-   __libc_freeres();
+   if ((to_run & VG_RUN__LIBC_FREERES) != 0) {
+      __libc_freeres();
+   }
 #  endif
-   VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__LIBC_FREERES_DONE, 
-                                   0, 0, 0, 0, 0, 0);
+#  endif
+
+   VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__FREERES_DONE, 0, 0, 0, 0, 0);
    /*NOTREACHED*/
    *(volatile int *)0 = 'x';
 }
+
+#endif // VGO_linux || VGO_solaris
+
+#if defined(VGO_linux)
 
 /* ---------------------------------------------------------------------
    Wrapper for indirect functions which need to be redirected.
@@ -101,7 +119,7 @@ void * VG_NOTIFY_ON_LOAD(ifunc_wrapper) (void)
        led to this function. This client request eventually gives control to
        the function VG_(redir_add_ifunc_target) in m_redir.c  */
     VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__ADD_IFUNC_TARGET,
-                                    fn.nraddr, fnentry, 0, 0, 0, 0);
+                                    fn.nraddr, fnentry, 0, 0, 0);
     return (void*)result;
 }
 

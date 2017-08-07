@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -488,6 +488,7 @@ static void os_state_clear(ThreadState *tst)
 {
    tst->os_state.lwpid       = 0;
    tst->os_state.threadgroup = 0;
+   tst->os_state.stk_id = NULL_STK_ID;
 #  if defined(VGO_linux)
    /* no other fields to clear */
 #  elif defined(VGO_darwin)
@@ -504,7 +505,6 @@ static void os_state_clear(ThreadState *tst)
 #  if defined(VGP_x86_solaris)
    tst->os_state.thrptr = 0;
 #  endif
-   tst->os_state.stk_id = (UWord)-1;
    tst->os_state.ustack = NULL;
    tst->os_state.in_door_return = False;
    tst->os_state.door_return_procedure = 0;
@@ -924,6 +924,14 @@ void run_thread_for_a_while ( /*OUT*/HWord* two_words,
    tst->arch.vex.host_EvC_COUNTER = *dispatchCtrP;
    tst->arch.vex.host_EvC_FAILADDR
       = (HWord)VG_(fnptr_to_fnentry)( &VG_(disp_cp_evcheck_fail) );
+
+   /* Invalidate any in-flight LL/SC transactions, in the case that we're
+      using the fallback LL/SC implementation.  See bugs 344524 and 369459. */
+#  if defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
+   tst->arch.vex.guest_LLaddr = (HWord)(-1);
+#  elif defined(VGP_arm64_linux)
+   tst->arch.vex.guest_LLSC_SIZE = 0;
+#  endif
 
    if (0) {
       vki_sigset_t m;
@@ -1445,8 +1453,8 @@ VgSchedReturnCode VG_(scheduler) ( ThreadId tid )
             before swapping to another.  That means that short term
             spins waiting for hardware to poke memory won't cause a
             thread swap. */
-         if (dispatch_ctr > 1000)
-            dispatch_ctr = 1000;
+         if (dispatch_ctr > 300)
+            dispatch_ctr = 300;
 	 break;
 
       case VG_TRC_INNER_COUNTERZERO:
@@ -1653,11 +1661,6 @@ VgSchedReturnCode VG_(scheduler) ( ThreadId tid )
 }
 
 
-/* 
-   This causes all threads to forceably exit.  They aren't actually
-   dead by the time this returns; you need to call
-   VG_(reap_threads)() to wait for them.
- */
 void VG_(nuke_all_threads_except) ( ThreadId me, VgSchedReturnCode src )
 {
    ThreadId tid;
@@ -1705,9 +1708,6 @@ void VG_(nuke_all_threads_except) ( ThreadId me, VgSchedReturnCode src )
 #elif defined(VGA_mips32) || defined(VGA_mips64)
 #  define VG_CLREQ_ARGS       guest_r12
 #  define VG_CLREQ_RET        guest_r11
-#elif defined(VGA_tilegx)
-#  define VG_CLREQ_ARGS       guest_r12
-#  define VG_CLREQ_RET        guest_r11
 #else
 #  error Unknown arch
 #endif
@@ -1744,12 +1744,13 @@ static Bool os_client_request(ThreadId tid, UWord *args)
    vg_assert(VG_(is_running_thread)(tid));
 
    switch(args[0]) {
-   case VG_USERREQ__LIBC_FREERES_DONE:
+   case VG_USERREQ__FREERES_DONE:
       /* This is equivalent to an exit() syscall, but we don't set the
 	 exitcode (since it might already be set) */
       if (0 || VG_(clo_trace_syscalls) || VG_(clo_trace_sched))
          VG_(message)(Vg_DebugMsg, 
-                      "__libc_freeres() done; really quitting!\n");
+                      "__gnu_cxx::__freeres() and __libc_freeres() wrapper "
+                      "done; really quitting!\n");
       VG_(threads)[tid].exitreason = VgSrc_ExitThread;
       break;
 
@@ -1881,24 +1882,6 @@ void do_client_request ( ThreadId tid )
 	    SET_CLCALL_RETVAL(tid, f ( tid, arg[2], arg[3], arg[4] ), (Addr)f );
          break;
       }
-      case VG_USERREQ__CLIENT_CALL4: {
-         UWord (*f)(ThreadId, UWord, UWord, UWord, UWord) = (void*)arg[1];
-     if (f == NULL)
-        VG_(message)(Vg_DebugMsg, "VG_USERREQ__CLIENT_CALL4: func=%p\n", f);
-     else
-        SET_CLCALL_RETVAL(tid, f ( tid, arg[2], arg[3], arg[4], arg[5] ),
-                (Addr)f );
-         break;
-      }
-      case VG_USERREQ__CLIENT_CALL5: {
-         UWord (*f)(ThreadId, UWord, UWord, UWord, UWord, UWord) = (void*)arg[1];
-     if (f == NULL)
-        VG_(message)(Vg_DebugMsg, "VG_USERREQ__CLIENT_CALL5: func=%p\n", f);
-     else
-        SET_CLCALL_RETVAL(tid, f ( tid, arg[2], arg[3], arg[4], arg[5],
-                arg[6] ), (Addr)f );
-         break;
-      }
 
       // Nb: this looks like a circular definition, because it kind of is.
       // See comment in valgrind.h to understand what's going on.
@@ -2005,14 +1988,6 @@ void do_client_request ( ThreadId tid )
 	 info->tl___builtin_delete     = VG_(tdict).tool___builtin_delete;
 	 info->tl___builtin_vec_delete = VG_(tdict).tool___builtin_vec_delete;
          info->tl_malloc_usable_size   = VG_(tdict).tool_malloc_usable_size;
-	 info->tl_rte_malloc           = VG_(tdict).tool_rte_malloc;
-	 info->tl_rte_calloc           = VG_(tdict).tool_rte_calloc;
-	 info->tl_rte_zmalloc          = VG_(tdict).tool_rte_zmalloc;
-	 info->tl_rte_realloc          = VG_(tdict).tool_rte_realloc;
-	 info->tl_rte_malloc_socket    = VG_(tdict).tool_rte_malloc_socket;
-	 info->tl_rte_calloc_socket    = VG_(tdict).tool_rte_calloc_socket;
-	 info->tl_rte_zmalloc_socket   = VG_(tdict).tool_rte_zmalloc_socket;
-	 info->tl_rte_free             = VG_(tdict).tool_rte_free;
 
 	 info->mallinfo                = VG_(mallinfo);
 	 info->clo_trace_malloc        = VG_(clo_trace_malloc);
@@ -2034,6 +2009,15 @@ void do_client_request ( ThreadId tid )
             arg[1], arg[2], "scheduler(VG_USERREQ__DISCARD_TRANSLATIONS)" 
          );
 
+         SET_CLREQ_RETVAL( tid, 0 );     /* return value is meaningless */
+	 break;
+
+      case VG_USERREQ__INNER_THREADS:
+         if (VG_(clo_verbosity) > 2)
+            VG_(printf)( "client request: INNER_THREADS,"
+                         " addr %p\n",
+                         (void*)arg[1] );
+         VG_(inner_threads) = (ThreadState*)arg[1];
          SET_CLREQ_RETVAL( tid, 0 );     /* return value is meaningless */
 	 break;
 

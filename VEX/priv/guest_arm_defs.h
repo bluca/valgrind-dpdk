@@ -6,7 +6,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2004-2015 OpenWorks LLP
+   Copyright (C) 2004-2017 OpenWorks LLP
       info@open-works.net
 
    This program is free software; you can redistribute it and/or
@@ -40,7 +40,7 @@
 /*---------------------------------------------------------*/
 
 /* Convert one ARM insn to IR.  See the type DisOneInstrFn in
-   bb_to_IR.h. */
+  geust_generic_ bb_to_IR.h. */
 extern
 DisResult disInstr_ARM ( IRSB*        irbb,
                          Bool         (*resteerOkFn) ( void*, Addr ),
@@ -110,6 +110,118 @@ UInt armg_calculate_condition ( UInt cond_n_op /* ARMCondcode << 4 | cc_op */,
 extern 
 UInt armg_calculate_flag_qc ( UInt resL1, UInt resL2,
                               UInt resR1, UInt resR2 );
+
+/* --- DIRTY HELPERS --- */
+
+/* Confusingly, for the AES insns, the 32-bit ARM docs refers to the
+   one-and-only source register as 'm' whereas the 64-bit docs refer to
+   it as 'n'.  We sidestep that here by just calling it 'arg32_*'. */
+
+extern
+void armg_dirtyhelper_AESE (
+        /*OUT*/V128* res,
+        UInt arg32_3, UInt arg32_2, UInt arg32_1, UInt arg32_0
+     );
+
+extern
+void armg_dirtyhelper_AESD (
+        /*OUT*/V128* res,
+        UInt arg32_3, UInt arg32_2, UInt arg32_1, UInt arg32_0
+     );
+
+extern
+void armg_dirtyhelper_AESMC (
+        /*OUT*/V128* res,
+        UInt arg32_3, UInt arg32_2, UInt arg32_1, UInt arg32_0
+     );
+
+extern
+void armg_dirtyhelper_AESIMC (
+        /*OUT*/V128* res,
+        UInt arg32_3, UInt arg32_2, UInt arg32_1, UInt arg32_0
+     );
+
+extern
+void armg_dirtyhelper_SHA1C (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argN3, UInt argN2, UInt argN1, UInt argN0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA1P (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argN3, UInt argN2, UInt argN1, UInt argN0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA1M (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argN3, UInt argN2, UInt argN1, UInt argN0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA1SU0 (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argN3, UInt argN2, UInt argN1, UInt argN0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA256H (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argN3, UInt argN2, UInt argN1, UInt argN0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA256H2 (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argN3, UInt argN2, UInt argN1, UInt argN0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA256SU1 (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argN3, UInt argN2, UInt argN1, UInt argN0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA1SU1 (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA256SU0 (
+        /*OUT*/V128* res,
+        UInt argD3, UInt argD2, UInt argD1, UInt argD0,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_SHA1H (
+        /*OUT*/V128* res,
+        UInt argM3, UInt argM2, UInt argM1, UInt argM0
+     );
+
+extern
+void armg_dirtyhelper_VMULLP64 (
+        /*OUT*/V128* res,
+        UInt argN1, UInt argN0, UInt argM1, UInt argM0
+     );
 
 
 /*---------------------------------------------------------*/

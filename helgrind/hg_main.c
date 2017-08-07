@@ -8,10 +8,10 @@
    This file is part of Helgrind, a Valgrind tool for detecting errors
    in threaded programs.
 
-   Copyright (C) 2007-2015 OpenWorks LLP
+   Copyright (C) 2007-2017 OpenWorks LLP
       info@open-works.co.uk
 
-   Copyright (C) 2007-2015 Apple, Inc.
+   Copyright (C) 2007-2017 Apple, Inc.
 
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License as
@@ -57,6 +57,8 @@
 #include "pub_tool_aspacemgr.h" // VG_(am_is_valid_for_client)
 #include "pub_tool_poolalloc.h"
 #include "pub_tool_addrinfo.h"
+#include "pub_tool_xtree.h"
+#include "pub_tool_xtmemory.h"
 
 #include "hg_basics.h"
 #include "hg_wordset.h"
@@ -284,7 +286,7 @@ static void lockN_acquire_writer ( Lock* lk, Thread* thr )
          /* 2nd and subsequent locking of a lock by its owner */
          tl_assert(lk->heldW);
          /* assert: lk is only held by one thread .. */
-         tl_assert(VG_(sizeUniqueBag(lk->heldBy)) == 1);
+         tl_assert(VG_(sizeUniqueBag)(lk->heldBy) == 1);
          /* assert: .. and that thread is 'thr'. */
          tl_assert(VG_(elemBag)(lk->heldBy, (UWord)thr)
                    == VG_(sizeTotalBag)(lk->heldBy));
@@ -3457,7 +3459,7 @@ void evh__HG_RTLD_BIND_CLEAR(ThreadId tid, Int flags)
 
    The common case is that some thread T holds (eg) L1 L2 and L3 and
    is repeatedly acquiring and releasing Ln, and there is no ordering
-   error in what it is doing.  Hence it repeatly:
+   error in what it is doing.  Hence it repeatedly:
 
    (1) searches laog to see if Ln --*--> {L1,L2,L3}, which always 
        produces the answer No (because there is no error).
@@ -4157,6 +4159,8 @@ void* handle_alloc ( ThreadId tid,
    md->thr     = map_threads_lookup( tid );
 
    VG_(HT_add_node)( hg_mallocmeta_table, (VgHashNode*)md );
+   if (UNLIKELY(VG_(clo_xtree_memory) == Vg_XTMemory_Full))
+      VG_(XTMemory_Full_alloc)(md->szB, md->where);
 
    /* Tell the lower level memory wranglers. */
    evh__new_mem_heap( p, szB, is_zeroed );
@@ -4211,6 +4215,10 @@ static void handle_free ( ThreadId tid, void* p )
 
    tl_assert(md->payload == (Addr)p);
    szB = md->szB;
+   if (UNLIKELY(VG_(clo_xtree_memory) == Vg_XTMemory_Full)) {
+      ExeContext* ec_free = VG_(record_ExeContext)( tid, 0 );
+      VG_(XTMemory_Full_free)(md->szB, md->where, ec_free);
+   }
 
    /* Nuke the metadata block */
    old_md = (MallocMeta*)
@@ -4237,8 +4245,7 @@ static void hg_cli____builtin_vec_delete ( ThreadId tid, void* p ) {
 }
 
 
-static void* handle_realloc ( ThreadId tid, void* payloadV, SizeT new_size,
-        SizeT alignB )
+static void* hg_cli__realloc ( ThreadId tid, void* payloadV, SizeT new_size )
 {
    MallocMeta *md, *md_new, *md_tmp;
    SizeT      i;
@@ -4269,7 +4276,7 @@ static void* handle_realloc ( ThreadId tid, void* payloadV, SizeT new_size,
 
    /* else */ {
       /* new size is bigger */
-      Addr p_new = (Addr)VG_(cli_malloc)(alignB, new_size);
+      Addr p_new = (Addr)VG_(cli_malloc)(VG_(clo_alignment), new_size);
 
       /* First half kept and copied, second half new */
       // FIXME: shouldn't we use a copier which implements the
@@ -4312,11 +4319,6 @@ static void* handle_realloc ( ThreadId tid, void* payloadV, SizeT new_size,
 
       return (void*)p_new;
    }  
-}
-
-static void* hg_cli__realloc ( ThreadId tid, void* payloadV, SizeT new_size )
-{
-   return handle_realloc ( tid, payloadV, new_size, VG_(clo_alignment) );
 }
 
 static SizeT hg_cli_malloc_usable_size ( ThreadId tid, void* p )
@@ -4388,85 +4390,6 @@ Bool HG_(mm_find_containing_block)( /*OUT*/ExeContext** where,
    if (payload) *payload = mm->payload;
    if (szB)     *szB     = mm->szB;
    return True;
-}
-
-static void* hg_cli__rte_malloc ( ThreadId tid, const char *type, SizeT n,
-        unsigned align )
-{
-   if (((SSizeT)n) < 0) return NULL;
-
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return handle_alloc ( tid, n, align, /*is_zeroed*/False );
-}
-
-static void* hg_cli__rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
-        SizeT size1, unsigned align )
-{
-   if ( ((SSizeT)nmemb) < 0 || ((SSizeT)size1) < 0 ) return NULL;
-
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return handle_alloc ( tid, nmemb*size1, align, /*is_zeroed*/True );
-}
-
-static void* hg_cli__rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
-        unsigned align )
-{
-   if (((SSizeT)n) < 0) return NULL;
-
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return handle_alloc ( tid, n, align, /*is_zeroed*/True );
-}
-
-static void* hg_cli__rte_realloc ( ThreadId tid, void* p_old, SizeT new_szB,
-        unsigned align )
-{
-   if (((SSizeT)new_szB) < 0) return NULL;
-
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return handle_realloc ( tid, p_old, new_szB, align );
-}
-
-static void* hg_cli__rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket )
-{
-   return hg_cli__rte_malloc ( tid, type, n, align );
-}
-
-static void* hg_cli__rte_calloc_socket ( ThreadId tid, const char *type,
-        SizeT nmemb, SizeT size1, unsigned align, int socket )
-{
-   return hg_cli__rte_calloc ( tid, type, nmemb, size1, align );
-}
-
-static void* hg_cli__rte_zmalloc_socket ( ThreadId tid, const char *type,
-        SizeT n, unsigned align, int socket )
-{
-   return hg_cli__rte_zmalloc ( tid, type, n, align );
-}
-
-static void hg_cli__rte_free ( ThreadId tid, void* p )
-{
-   hg_cli__free ( tid, p );
 }
 
 
@@ -4674,7 +4597,6 @@ static Bool is_in_dynamic_linker_shared_object( Addr ga )
 {
    DebugInfo* dinfo;
    const HChar* soname;
-   if (0) return False;
 
    dinfo = VG_(find_DebugInfo)( ga );
    if (!dinfo) return False;
@@ -4683,23 +4605,7 @@ static Bool is_in_dynamic_linker_shared_object( Addr ga )
    tl_assert(soname);
    if (0) VG_(printf)("%s\n", soname);
 
-#  if defined(VGO_linux)
-   if (VG_STREQ(soname, VG_U_LD_LINUX_SO_3))        return True;
-   if (VG_STREQ(soname, VG_U_LD_LINUX_SO_2))        return True;
-   if (VG_STREQ(soname, VG_U_LD_LINUX_X86_64_SO_2)) return True;
-   if (VG_STREQ(soname, VG_U_LD64_SO_1))            return True;
-   if (VG_STREQ(soname, VG_U_LD64_SO_2))            return True;
-   if (VG_STREQ(soname, VG_U_LD_SO_1))              return True;
-   if (VG_STREQ(soname, VG_U_LD_LINUX_AARCH64_SO_1)) return True;
-   if (VG_STREQ(soname, VG_U_LD_LINUX_ARMHF_SO_3))  return True;
-#  elif defined(VGO_darwin)
-   if (VG_STREQ(soname, VG_U_DYLD)) return True;
-#  elif defined(VGO_solaris)
-   if (VG_STREQ(soname, VG_U_LD_SO_1)) return True;
-#  else
-#    error "Unsupported OS"
-#  endif
-   return False;
+   return VG_(is_soname_ld_so)(soname);
 }
 
 static
@@ -4977,7 +4883,7 @@ typedef
       Word  master_level; // level of dependency between master and dependent
       Thread* hg_dependent; // helgrind Thread* for dependent task.
    }
-   GNAT_dmml;
+   GNAT_dmml; // (d)ependent (m)aster (m)aster_(l)evel.
 static XArray* gnat_dmmls;   /* of GNAT_dmml */
 static void gnat_dmmls_INIT (void)
 {
@@ -4987,6 +4893,25 @@ static void gnat_dmmls_INIT (void)
                                sizeof(GNAT_dmml) );
    }
 }
+
+static void xtmemory_report_next_block(XT_Allocs* xta, ExeContext** ec_alloc)
+{
+   const MallocMeta* md = VG_(HT_Next)(hg_mallocmeta_table);
+   if (md) {
+      xta->nbytes = md->szB;
+      xta->nblocks = 1;
+      *ec_alloc = md->where;
+   } else
+      xta->nblocks = 0;
+}
+static void HG_(xtmemory_report) ( const HChar* filename, Bool fini )
+{ 
+   // Make xtmemory_report_next_block ready to be called.
+   VG_(HT_ResetIter)(hg_mallocmeta_table);
+   VG_(XTMemory_report)(filename, fini, xtmemory_report_next_block,
+                        VG_(XT_filter_1top_and_maybe_below_main));
+}
+
 static void print_monitor_help ( void )
 {
    VG_(gdb_printf) 
@@ -4997,6 +4922,8 @@ static void print_monitor_help ( void )
 "           with no lock_addr, show status of all locks\n"
 "  accesshistory <addr> [<len>]   : show access history recorded\n"
 "                     for <len> (or 1) bytes at <addr>\n"
+"  xtmemory [<filename>]\n"
+"        dump xtree memory profile in <filename> (default xtmemory.kcg)\n"
 "\n");
 }
 
@@ -5004,7 +4931,7 @@ static void print_monitor_help ( void )
 static Bool handle_gdb_monitor_command (ThreadId tid, HChar *req)
 {
    HChar* wcmd;
-   HChar s[VG_(strlen(req))]; /* copy for strtok_r */
+   HChar s[VG_(strlen)(req)]; /* copy for strtok_r */
    HChar *ssaveptr;
    Int   kwdid;
 
@@ -5015,7 +4942,7 @@ static Bool handle_gdb_monitor_command (ThreadId tid, HChar *req)
       starts with the same first letter(s) as an already existing
       command. This ensures a shorter abbreviation for the user. */
    switch (VG_(keyword_id) 
-           ("help info accesshistory", 
+           ("help info accesshistory xtmemory", 
             wcmd, kwd_report_duplicated_matches)) {
    case -2: /* multiple matches */
       return True;
@@ -5073,6 +5000,12 @@ static Bool handle_gdb_monitor_command (ThreadId tid, HChar *req)
       {
          Addr address;
          SizeT szB = 1;
+         if (HG_(clo_history_level) < 2) {
+            VG_(gdb_printf)
+               ("helgrind must be started with --history-level=full"
+                " to use accesshistory\n");
+            return True;
+         }
          if (VG_(strtok_get_address_and_size) (&address, &szB, &ssaveptr)) {
             if (szB >= 1) 
                libhb_event_map_access_history (address, szB, HG_(print_access));
@@ -5081,6 +5014,13 @@ static Bool handle_gdb_monitor_command (ThreadId tid, HChar *req)
          }
          return True;
       }
+
+   case  3: { /* xtmemory */
+      HChar* filename;
+      filename = VG_(strtok_r) (NULL, " ", &ssaveptr);
+      HG_(xtmemory_report)(filename, False);
+      return True;
+   }
 
    default: 
       tl_assert(0);
@@ -5166,6 +5106,41 @@ Bool hg_handle_client_request ( ThreadId tid, UWord* args, UWord* ret)
          else
             *ret = -1;
          break;
+
+      /* This thread (tid) (a master) is informing us that it has
+         seen the termination of a dependent task, and that this should
+         be considered as a join between master and dependent. */
+      case _VG_USERREQ__HG_GNAT_DEPENDENT_MASTER_JOIN: {
+         Word n;
+         const Thread *stayer = map_threads_maybe_lookup( tid );
+         const void *dependent = (void*)args[1];
+         const void *master = (void*)args[2];
+
+         if (0)
+         VG_(printf)("HG_GNAT_DEPENDENT_MASTER_JOIN (tid %d): "
+                     "self_id = %p Thread* = %p dependent %p\n",
+                     (Int)tid, master, stayer, dependent);
+
+         gnat_dmmls_INIT();
+         /* Similar loop as for master completed hook below, but stops at
+            the first matching occurence, only comparing master and
+            dependent. */
+         for (n = VG_(sizeXA) (gnat_dmmls) - 1; n >= 0; n--) {
+            GNAT_dmml *dmml = (GNAT_dmml*) VG_(indexXA)(gnat_dmmls, n);
+            if (dmml->master == master
+                && dmml->dependent == dependent) {
+               if (0)
+               VG_(printf)("quitter %p dependency to stayer %p (join)\n",
+                           dmml->hg_dependent->hbthr,  stayer->hbthr);
+               tl_assert(dmml->hg_dependent->hbthr != stayer->hbthr);
+               generate_quitter_stayer_dependence (dmml->hg_dependent->hbthr,
+                                                   stayer->hbthr);
+               VG_(removeIndexXA) (gnat_dmmls, n);
+               break;
+            }
+         }
+         break;
+      }
 
       /* --- --- Client requests for Helgrind's use only --- --- */
 
@@ -5764,6 +5739,7 @@ static void hg_print_stats (void)
 
 static void hg_fini ( Int exitcode )
 {
+   HG_(xtmemory_report) (VG_(clo_xtree_memory_file), True);
    if (VG_(clo_verbosity) == 1 && !VG_(clo_xml)) {
       VG_(message)(Vg_UserMsg, 
                    "For counts of detected and suppressed errors, "
@@ -5836,6 +5812,9 @@ static void hg_post_clo_init ( void )
       laog__init();
 
    initialise_data_structures(hbthr_root);
+   if (VG_(clo_xtree_memory) == Vg_XTMemory_Full)
+      // Activate full xtree memory profiling.
+      VG_(XTMemory_Full_init)(VG_(XT_filter_1top_and_maybe_below_main));
 }
 
 static void hg_info_location (Addr a)
@@ -5849,7 +5828,7 @@ static void hg_pre_clo_init ( void )
    VG_(details_version)         (NULL);
    VG_(details_description)     ("a thread error detector");
    VG_(details_copyright_author)(
-      "Copyright (C) 2007-2015, and GNU GPL'd, by OpenWorks LLP et al.");
+      "Copyright (C) 2007-2017, and GNU GPL'd, by OpenWorks LLP et al.");
    VG_(details_bug_reports_to)  (VG_BUGS_TO);
    VG_(details_avg_translation_sizeB) ( 320 );
 
@@ -5895,14 +5874,6 @@ static void hg_pre_clo_init ( void )
                                    hg_cli____builtin_vec_delete,
                                    hg_cli__realloc,
                                    hg_cli_malloc_usable_size,
-                                   hg_cli__rte_malloc,
-                                   hg_cli__rte_calloc,
-                                   hg_cli__rte_zmalloc,
-                                   hg_cli__rte_realloc,
-                                   hg_cli__rte_malloc_socket,
-                                   hg_cli__rte_calloc_socket,
-                                   hg_cli__rte_zmalloc_socket,
-                                   hg_cli__rte_free,
                                    HG_CLI__DEFAULT_MALLOC_REDZONE_SZB );
 
    /* 21 Dec 08: disabled this; it mostly causes H to start more

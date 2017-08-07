@@ -3,7 +3,7 @@
 <meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
 <title>11. SGCheck: an experimental stack and global array overrun detector</title>
 <link rel="stylesheet" type="text/css" href="vg_basic.css">
-<meta name="generator" content="DocBook XSL Stylesheets V1.78.1">
+<meta name="generator" content="DocBook XSL Stylesheets V1.79.1">
 <link rel="home" href="index.html" title="Valgrind Documentation">
 <link rel="up" href="manual.html" title="Valgrind User Manual">
 <link rel="prev" href="dh-manual.html" title="10. DHAT: a dynamic heap analysis tool">
@@ -96,6 +96,15 @@ overflows its source or destination buffers for any specific call, but
 does not carry any restriction from one call to the next.  Indeed,
 multiple threads may make multiple simultaneous calls to
 (e.g.) <code class="function">memcpy</code> without mutual interference.</p>
+<p>It is important to note that the association is done between
+  a <span class="emphasis"><em>binary instruction</em></span> and an array, the
+  <span class="emphasis"><em>first time</em></span> this binary instruction accesses an
+  array during a function call.  When the same instruction is executed
+  again during the same function call, then SGCheck might report a
+  problem, if these further executions are not accessing the same
+  array. This technique causes several limitations in SGCheck, see
+  <a class="xref" href="sg-manual.html#sg-manual.limitations" title="11.5. Limitations">Limitations</a>.
+</p>
 </div>
 <div class="sect1">
 <div class="titlepage"><div><div><h2 class="title" style="clear: both">
@@ -116,7 +125,8 @@ not-as-robust-as-I-would-like assumptions on the behaviour of correct
 programs.  There are a number of limitations which you should be aware
 of.</p>
 <div class="itemizedlist"><ul class="itemizedlist" style="list-style-type: disc; ">
-<li class="listitem"><p>False negatives (missed errors): it follows from the
+<li class="listitem">
+<p>False negatives (missed errors): it follows from the
    description above (<a class="xref" href="sg-manual.html#sg-manual.how-works.sg-checks" title="11.3. How SGCheck Works">How SGCheck Works</a>)
    that the first access by a memory referencing instruction to a
    stack or global array creates an association between that
@@ -125,7 +135,11 @@ of.</p>
    the first access by an instruction to an array (in any given
    function instantiation) is not checked for overrun, since SGCheck
    uses that as the "example" of how subsequent accesses should
-   behave.</p></li>
+   behave.</p>
+<p>It also means that errors will not be found in an instruction
+     executed only once (e.g. because this instruction is not in a loop,
+     or the loop is executed only once).</p>
+</li>
 <li class="listitem">
 <p>False positives (false errors): similarly, and more serious,
    it is clearly possible to write legitimate pieces of code which

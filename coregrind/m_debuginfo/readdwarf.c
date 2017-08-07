@@ -8,7 +8,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -91,7 +91,6 @@ typedef struct
   ULong  li_header_length;
   UChar  li_min_insn_length;
   UChar  li_max_ops_per_insn;
-  UChar  li_default_is_stmt;
   Int    li_line_base;
   UChar  li_line_range;
   UChar  li_opcode_base;
@@ -150,7 +149,6 @@ typedef struct
   UInt  file;
   UInt  line;
   UInt  column;
-  Int   is_stmt;
   Int   basic_block;
   UChar end_sequence;
 } LineSMR;
@@ -230,7 +228,7 @@ ULong read_initial_length_field ( DiCursor p_img, /*OUT*/Bool* is64 )
 static LineSMR state_machine_regs;
 
 static 
-void reset_state_machine ( Int is_stmt )
+void reset_state_machine ( void )
 {
    if (0) VG_(printf)("smr.a := %p (reset)\n", NULL );
    state_machine_regs.last_address = 0;
@@ -240,7 +238,6 @@ void reset_state_machine ( Int is_stmt )
    state_machine_regs.file = 1;
    state_machine_regs.line = 1;
    state_machine_regs.column = 0;
-   state_machine_regs.is_stmt = is_stmt;
    state_machine_regs.basic_block = 0;
    state_machine_regs.end_sequence = 0;
 }
@@ -253,7 +250,7 @@ void reset_state_machine ( Int is_stmt )
 static 
 void process_extended_line_op( struct _DebugInfo* di,
                                XArray* fndn_ix_xa,
-                               DiCursor* data, Int is_stmt)
+                               DiCursor* data )
 {
    UInt len = step_leb128U(data);
    if (len == 0) {
@@ -275,19 +272,17 @@ void process_extended_line_op( struct _DebugInfo* di,
             reset_state_machine below */
          state_machine_regs.end_sequence = 1; 
 
-         if (state_machine_regs.is_stmt) {
-            if (state_machine_regs.last_address) {
-               ML_(addLineInfo) (
-                  di,
-                  safe_fndn_ix (fndn_ix_xa,
-                                state_machine_regs.last_file),
-                  di->text_debug_bias + state_machine_regs.last_address, 
-                  di->text_debug_bias + state_machine_regs.address, 
-                  state_machine_regs.last_line, 0
-               );
-            }
+         if (state_machine_regs.last_address) {
+            ML_(addLineInfo)(
+               di,
+               safe_fndn_ix(fndn_ix_xa,
+                            state_machine_regs.last_file),
+               di->text_debug_bias + state_machine_regs.last_address, 
+               di->text_debug_bias + state_machine_regs.address, 
+               state_machine_regs.last_line, 0
+            );
          }
-         reset_state_machine (is_stmt);
+         reset_state_machine();
          if (di->ddump_line)
             VG_(printf)("  Extended opcode %d: End of Sequence\n\n", 
                         (Int)op_code);
@@ -446,29 +441,9 @@ void read_dwarf2_lineblock ( struct _DebugInfo* di,
       info.li_max_ops_per_insn = 1;
    }
 
-   info.li_default_is_stmt = ML_(cur_step_UChar)(&external);
-   if (di->ddump_line)
-      VG_(printf)("  Initial value of 'is_stmt':  %d\n", 
-                  (Int)info.li_default_is_stmt);
-
-   /* Josef Weidendorfer (20021021) writes:
-
-      It seems to me that the Intel Fortran compiler generates bad
-      DWARF2 line info code: It sets "is_stmt" of the state machine in
-      the line info reader to be always false. Thus, there is never
-      a statement boundary generated and therefore never an instruction
-      range/line number mapping generated for valgrind.
-
-      Please have a look at the DWARF2 specification, Ch. 6.2
-      (x86.ddj.com/ftp/manuals/tools/dwarf.pdf).  Perhaps I understand
-      this wrong, but I don't think so.
-
-      I just had a look at the GDB DWARF2 reader...  They completely
-      ignore "is_stmt" when recording line info ;-) That's the reason
-      "objdump -S" works on files from the intel fortran compiler.
-
-      Therefore: */
-   info.li_default_is_stmt = True; 
+   /* Register is_stmt is not tracked as we are interested only
+      in pc -> line info mapping and not other debugger features. */
+   /* default_is_stmt = */ ML_(cur_step_UChar)(&external);
 
    /* JRS: changed (UInt*) to (UChar*) */
    info.li_line_base = ML_(cur_step_UChar)(&external);
@@ -495,7 +470,7 @@ void read_dwarf2_lineblock ( struct _DebugInfo* di,
    DiCursor end_of_sequence
      = ML_(cur_plus)(data, info.li_length + (is64 ? 12 : 4));
 
-   reset_state_machine (info.li_default_is_stmt);
+   reset_state_machine();
 
    /* Read the contents of the Opcodes table.  */
    DiCursor standard_opcodes = external;
@@ -632,15 +607,42 @@ void read_dwarf2_lineblock ( struct _DebugInfo* di,
                         (Int)op_code, advAddr, state_machine_regs.address,
                         (Int)adv, (Int)state_machine_regs.line );
 
-         if (state_machine_regs.is_stmt) {
+         /* only add a statement if there was a previous boundary */
+         if (state_machine_regs.last_address) {
+            ML_(addLineInfo)(
+               di,
+               safe_fndn_ix(fndn_ix_xa,
+                            state_machine_regs.last_file),
+               di->text_debug_bias + state_machine_regs.last_address, 
+               di->text_debug_bias + state_machine_regs.address, 
+               state_machine_regs.last_line, 
+               0
+            );
+         }
+         state_machine_regs.last_address = state_machine_regs.address;
+         state_machine_regs.last_file = state_machine_regs.file;
+         state_machine_regs.last_line = state_machine_regs.line;
+      }
+
+      else { /* ! (op_code >= info.li_opcode_base) */
+
+      switch (op_code) {
+         case DW_LNS_extended_op:
+            process_extended_line_op(di, fndn_ix_xa, &data);
+            break;
+
+         case DW_LNS_copy:
+            if (0) VG_(printf)("1002: di->o %#lx, smr.a %#lx\n",
+                               (UWord)di->text_debug_bias,
+                               state_machine_regs.address );
             /* only add a statement if there was a previous boundary */
             if (state_machine_regs.last_address) {
                ML_(addLineInfo)(
                   di,
-                  safe_fndn_ix (fndn_ix_xa,
-                                state_machine_regs.last_file),
+                  safe_fndn_ix(fndn_ix_xa,
+                               state_machine_regs.last_file), 
                   di->text_debug_bias + state_machine_regs.last_address, 
-                  di->text_debug_bias + state_machine_regs.address, 
+                  di->text_debug_bias + state_machine_regs.address,
                   state_machine_regs.last_line, 
                   0
                );
@@ -648,39 +650,6 @@ void read_dwarf2_lineblock ( struct _DebugInfo* di,
             state_machine_regs.last_address = state_machine_regs.address;
             state_machine_regs.last_file = state_machine_regs.file;
             state_machine_regs.last_line = state_machine_regs.line;
-         }
-      }
-
-      else { /* ! (op_code >= info.li_opcode_base) */
-
-      switch (op_code) {
-         case DW_LNS_extended_op:
-            process_extended_line_op (
-                       di, fndn_ix_xa,
-                       &data, info.li_default_is_stmt);
-            break;
-
-         case DW_LNS_copy:
-            if (0) VG_(printf)("1002: di->o %#lx, smr.a %#lx\n",
-                               (UWord)di->text_debug_bias,
-                               state_machine_regs.address );
-            if (state_machine_regs.is_stmt) {
-               /* only add a statement if there was a previous boundary */
-               if (state_machine_regs.last_address) {
-                  ML_(addLineInfo)(
-                     di,
-                     safe_fndn_ix (fndn_ix_xa,
-                                   state_machine_regs.last_file), 
-                     di->text_debug_bias + state_machine_regs.last_address, 
-                     di->text_debug_bias + state_machine_regs.address,
-                     state_machine_regs.last_line, 
-                     0
-                  );
-               }
-               state_machine_regs.last_address = state_machine_regs.address;
-               state_machine_regs.last_file = state_machine_regs.file;
-               state_machine_regs.last_line = state_machine_regs.line;
-            }
             state_machine_regs.basic_block = 0; /* JRS added */
             if (di->ddump_line)
                VG_(printf)("  Copy\n");
@@ -719,9 +688,6 @@ void read_dwarf2_lineblock ( struct _DebugInfo* di,
             break;
          }
          case DW_LNS_negate_stmt: {
-            Int adv = state_machine_regs.is_stmt;
-            adv = ! adv;
-            state_machine_regs.is_stmt = adv;
             if (di->ddump_line)
                VG_(printf)("  DWARF2-line: negate_stmt\n");
             break;
@@ -887,7 +853,7 @@ void read_unitinfo_dwarf2( /*OUT*/UnitInfo* ui,
       if ( acode != abcode ) {
          /* This isn't illegal, but somewhat unlikely. Normally the
           * first abbrev describes the first DIE, the compile_unit.
-          * But maybe this abbrevation data is shared with another
+          * But maybe this abbreviation data is shared with another
           * or it is a NULL entry used for padding. See para 7.5.3. */
          abbrev_img = lookup_abbrev( ML_(cur_plus)(debugabbrev_img, atoffs),
                                      acode );
@@ -1766,10 +1732,6 @@ void ML_(read_debuginfo_dwarf1) (
 #  define FP_REG         30
 #  define SP_REG         29
 #  define RA_REG_DEFAULT 31
-#elif defined(VGP_tilegx_linux)
-#  define FP_REG         52
-#  define SP_REG         54
-#  define RA_REG_DEFAULT 55
 #else
 #  error "Unknown platform"
 #endif
@@ -1782,7 +1744,7 @@ void ML_(read_debuginfo_dwarf1) (
      || defined(VGP_ppc64le_linux) || defined(VGP_mips32_linux) \
      || defined(VGP_mips64_linux)
 # define N_CFI_REGS 72
-#elif defined(VGP_arm_linux) || defined(VGP_tilegx_linux)
+#elif defined(VGP_arm_linux)
 # define N_CFI_REGS 320
 #elif defined(VGP_arm64_linux)
 # define N_CFI_REGS 128
@@ -1933,7 +1895,7 @@ typedef
       Int     data_a_f;
       Addr    initloc;
       Int     ra_reg;
-      /* The rest of these fields can be modifed by
+      /* The rest of these fields can be modified by
          run_CF_instruction. */
       /* The LOC entry */
       Addr    loc;
@@ -2092,8 +2054,7 @@ static Bool summarise_context(/*OUT*/Addr* base,
    if (ctxs->cfa_is_regoff && ctxs->cfa_reg == SP_REG) {
       si_m->cfa_off = ctxs->cfa_off;
 #     if defined(VGA_x86) || defined(VGA_amd64) || defined(VGA_s390x) \
-         || defined(VGA_mips32) || defined(VGA_mips64) \
-         || defined(VGA_tilegx)
+         || defined(VGA_mips32) || defined(VGA_mips64)
       si_m->cfa_how = CFIC_IA_SPREL;
 #     elif defined(VGA_arm)
       si_m->cfa_how = CFIC_ARM_R13REL;
@@ -2107,8 +2068,7 @@ static Bool summarise_context(/*OUT*/Addr* base,
    if (ctxs->cfa_is_regoff && ctxs->cfa_reg == FP_REG) {
       si_m->cfa_off = ctxs->cfa_off;
 #     if defined(VGA_x86) || defined(VGA_amd64) || defined(VGA_s390x) \
-         || defined(VGA_mips32) || defined(VGA_mips64) \
-         || defined(VGA_tilegx)
+         || defined(VGA_mips32) || defined(VGA_mips64)
       si_m->cfa_how = CFIC_IA_BPREL;
 #     elif defined(VGA_arm)
       si_m->cfa_how = CFIC_ARM_R12REL;
@@ -2397,48 +2357,6 @@ static Bool summarise_context(/*OUT*/Addr* base,
    *len  = (UInt)(ctx->loc - loc_start);
 
    return True;
-#  elif defined(VGA_tilegx)
-
-   /* --- entire tail of this fn specialised for tilegx --- */
-
-   SUMMARISE_HOW(si_m->ra_how, si_m->ra_off,
-                               ctxs->reg[ctx->ra_reg] );
-   SUMMARISE_HOW(si_m->fp_how, si_m->fp_off,
-                               ctxs->reg[FP_REG] );
-   SUMMARISE_HOW(si_m->sp_how, si_m->sp_off,
-                               ctxs->reg[SP_REG] );
-   si_m->sp_how = CFIR_CFAREL;
-   si_m->sp_off = 0;
-
-   if (si_m->fp_how == CFIR_UNKNOWN)
-       si_m->fp_how = CFIR_SAME;
-   if (si_m->cfa_how == CFIR_UNKNOWN) {
-      si_m->cfa_how = CFIC_IA_SPREL;
-      si_m->cfa_off = 160;
-   }
-   if (si_m->ra_how == CFIR_UNKNOWN) {
-      if (!debuginfo->cfsi_exprs)
-         debuginfo->cfsi_exprs = VG_(newXA)( ML_(dinfo_zalloc),
-                                             "di.ccCt.2a",
-                                             ML_(dinfo_free),
-                                             sizeof(CfiExpr) );
-      si_m->ra_how = CFIR_EXPR;
-      si_m->ra_off = ML_(CfiExpr_CfiReg)( debuginfo->cfsi_exprs,
-                                          Creg_TILEGX_LR);
-   }
-
-   if (si_m->ra_how == CFIR_SAME)
-      { why = 3; goto failed; }
-
-   if (loc_start >= ctx->loc) 
-      { why = 4; goto failed; }
-   if (ctx->loc - loc_start > 10000000 /* let's say */)
-      { why = 5; goto failed; }
-
-   *base = loc_start + ctx->initloc;
-   *len  = (UInt)(ctx->loc - loc_start);
-
-   return True;
 #  elif defined(VGA_ppc32) || defined(VGA_ppc64be) || defined(VGA_ppc64le)
    /* These don't use CFI based unwinding (is that really true?) */
 
@@ -2535,13 +2453,6 @@ static Int copy_convert_CfiExpr_tree ( XArray*        dstxa,
          I_die_here;
 #        elif defined(VGA_ppc32) || defined(VGA_ppc64be) \
             || defined(VGA_ppc64le)
-#        elif defined(VGA_tilegx)
-         if (dwreg == SP_REG)
-            return ML_(CfiExpr_CfiReg)( dstxa, Creg_TILEGX_SP );
-         if (dwreg == FP_REG)
-            return ML_(CfiExpr_CfiReg)( dstxa, Creg_TILEGX_BP );
-         if (dwreg == srcuc->ra_reg)
-            return ML_(CfiExpr_CfiReg)( dstxa, Creg_TILEGX_IP );
 #        else
 #           error "Unknown arch"
 #        endif
@@ -3585,8 +3496,9 @@ static Int show_CF_instruction ( DiCursor instrIN,
          break;
 
       case DW_CFA_ORCL_arg_loc:
-         /* :TODO: Print all arguments when implemented in libdwarf. */
-         VG_(printf)("  sci:DW_CFA_ORCL_arg_loc\n");
+         reg = step_leb128( &instr, 0 );
+         len = step_leb128( &instr, 0 );
+         VG_(printf)("  sci:DW_CFA_ORCL_arg_loc(%d, length %d)\n", reg, len);
          break;
 
       default: 

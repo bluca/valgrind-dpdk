@@ -3,7 +3,7 @@
 <meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
 <title>Valgrind User Manual</title>
 <link rel="stylesheet" type="text/css" href="vg_basic.css">
-<meta name="generator" content="DocBook XSL Stylesheets V1.78.1">
+<meta name="generator" content="DocBook XSL Stylesheets V1.79.1">
 <link rel="home" href="index.html" title="Valgrind Documentation">
 <link rel="up" href="index.html" title="Valgrind Documentation">
 <link rel="prev" href="quick-start.html" title="The Valgrind Quick Start Guide">
@@ -22,10 +22,10 @@
 <div>
 <div><h1 class="title">
 <a name="manual"></a>Valgrind User Manual</h1></div>
-<div><p class="releaseinfo">Release 3.11.0 22 September 2015</p></div>
-<div><p class="copyright">Copyright © 2000-2015 <a class="ulink" href="http://www.valgrind.org/info/developers.html" target="_top">Valgrind Developers</a></p></div>
+<div><p class="releaseinfo">Release 3.13.0 15 June 2017</p></div>
+<div><p class="copyright">Copyright © 2000-2017 <a class="ulink" href="http://www.valgrind.org/info/developers.html" target="_top">Valgrind Developers</a></p></div>
 <div><div class="legalnotice">
-<a name="idm257592007232"></a><p>Email: <a class="ulink" href="mailto:valgrind@valgrind.org" target="_top">valgrind@valgrind.org</a></p>
+<a name="idm140394925654576"></a><p>Email: <a class="ulink" href="mailto:valgrind@valgrind.org" target="_top">valgrind@valgrind.org</a></p>
 </div></div>
 </div>
 <hr>
@@ -58,11 +58,12 @@
 <dt><span class="sect1"><a href="manual-core.html#manual-core.pthreads">2.7. Support for Threads</a></span></dt>
 <dd><dl><dt><span class="sect2"><a href="manual-core.html#manual-core.pthreads_perf_sched">2.7.1. Scheduling and Multi-Thread Performance</a></span></dt></dl></dd>
 <dt><span class="sect1"><a href="manual-core.html#manual-core.signals">2.8. Handling of Signals</a></span></dt>
-<dt><span class="sect1"><a href="manual-core.html#manual-core.install">2.9. Building and Installing Valgrind</a></span></dt>
-<dt><span class="sect1"><a href="manual-core.html#manual-core.problems">2.10. If You Have Problems</a></span></dt>
-<dt><span class="sect1"><a href="manual-core.html#manual-core.limits">2.11. Limitations</a></span></dt>
-<dt><span class="sect1"><a href="manual-core.html#manual-core.example">2.12. An Example Run</a></span></dt>
-<dt><span class="sect1"><a href="manual-core.html#manual-core.warnings">2.13. Warning Messages You Might See</a></span></dt>
+<dt><span class="sect1"><a href="manual-core.html#manual-core.xtree">2.9. Execution Trees</a></span></dt>
+<dt><span class="sect1"><a href="manual-core.html#manual-core.install">2.10. Building and Installing Valgrind</a></span></dt>
+<dt><span class="sect1"><a href="manual-core.html#manual-core.problems">2.11. If You Have Problems</a></span></dt>
+<dt><span class="sect1"><a href="manual-core.html#manual-core.limits">2.12. Limitations</a></span></dt>
+<dt><span class="sect1"><a href="manual-core.html#manual-core.example">2.13. An Example Run</a></span></dt>
+<dt><span class="sect1"><a href="manual-core.html#manual-core.warnings">2.14. Warning Messages You Might See</a></span></dt>
 </dl></dd>
 <dt><span class="chapter"><a href="manual-core-adv.html">3. Using and understanding the Valgrind core: Advanced Topics</a></span></dt>
 <dd><dl>
@@ -270,9 +271,9 @@ function</a></span></dt>
 <dt><span class="sect1"><a href="dh-manual.html#dh-manual.overview">10.1. Overview</a></span></dt>
 <dt><span class="sect1"><a href="dh-manual.html#dh-manual.understanding">10.2. Understanding DHAT's output</a></span></dt>
 <dd><dl>
-<dt><span class="sect2"><a href="dh-manual.html#idm257589292208">10.2.1. Interpreting the max-live, tot-alloc and deaths fields</a></span></dt>
-<dt><span class="sect2"><a href="dh-manual.html#idm257590618576">10.2.2. Interpreting the acc-ratios fields</a></span></dt>
-<dt><span class="sect2"><a href="dh-manual.html#idm257591842928">10.2.3. Interpreting "Aggregated access counts by offset" data</a></span></dt>
+<dt><span class="sect2"><a href="dh-manual.html#idm140394924138288">10.2.1. Interpreting the max-live, tot-alloc and deaths fields</a></span></dt>
+<dt><span class="sect2"><a href="dh-manual.html#idm140394926128304">10.2.2. Interpreting the acc-ratios fields</a></span></dt>
+<dt><span class="sect2"><a href="dh-manual.html#idm140394925890256">10.2.3. Interpreting "Aggregated access counts by offset" data</a></span></dt>
 </dl></dd>
 <dt><span class="sect1"><a href="dh-manual.html#dh-manual.options">10.3. DHAT Command-line Options</a></span></dt>
 </dl></dd>

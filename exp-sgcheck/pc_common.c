@@ -9,7 +9,7 @@
    This file is part of Ptrcheck, a Valgrind tool for checking pointer
    use in programs.
 
-   Copyright (C) 2008-2015 OpenWorks Ltd
+   Copyright (C) 2008-2017 OpenWorks Ltd
       info@open-works.co.uk
 
    This program is free software; you can redistribute it and/or
@@ -779,7 +779,7 @@ const HChar* pc_get_error_name ( const Error* err )
 SizeT pc_get_extra_suppression_info ( const Error* err,
                                       /*OUT*/HChar* buf, Int nBuf )
 {
-   ErrorKind ekind = VG_(get_error_kind )(err);
+   ErrorKind ekind = VG_(get_error_kind)(err);
    tl_assert(buf);
    tl_assert(nBuf >= 1);
 

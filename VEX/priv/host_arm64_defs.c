@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2013-2015 OpenWorks
+   Copyright (C) 2013-2017 OpenWorks
       info@open-works.net
 
    This program is free software; you can redistribute it and/or
@@ -1005,9 +1005,21 @@ ARM64Instr* ARM64Instr_StrEX ( Int szB ) {
    vassert(szB == 8 || szB == 4 || szB == 2 || szB == 1);
    return i;
 }
+ARM64Instr* ARM64Instr_CAS ( Int szB ) {
+   ARM64Instr* i = LibVEX_Alloc_inline(sizeof(ARM64Instr));
+   i->tag             = ARM64in_CAS;
+   i->ARM64in.CAS.szB = szB;
+   vassert(szB == 8 || szB == 4 || szB == 2 || szB == 1);
+   return i;
+}
 ARM64Instr* ARM64Instr_MFence ( void ) {
    ARM64Instr* i = LibVEX_Alloc_inline(sizeof(ARM64Instr));
    i->tag        = ARM64in_MFence;
+   return i;
+}
+ARM64Instr* ARM64Instr_ClrEX ( void ) {
+   ARM64Instr* i = LibVEX_Alloc_inline(sizeof(ARM64Instr));
+   i->tag        = ARM64in_ClrEX;
    return i;
 }
 ARM64Instr* ARM64Instr_VLdStH ( Bool isLoad, HReg sD, HReg rN, UInt uimm12 ) {
@@ -1564,8 +1576,15 @@ void ppARM64Instr ( const ARM64Instr* i ) {
                     sz, i->ARM64in.StrEX.szB == 8 ? 'x' : 'w');
          return;
       }
+      case ARM64in_CAS: {
+         vex_printf("x1 = cas(%dbit)(x3, x5 -> x7)", 8 * i->ARM64in.CAS.szB);
+         return;
+      }
       case ARM64in_MFence:
          vex_printf("(mfence) dsb sy; dmb sy; isb");
+         return;
+      case ARM64in_ClrEX:
+         vex_printf("clrex #15");
          return;
       case ARM64in_VLdStH:
          if (i->ARM64in.VLdStH.isLoad) {
@@ -2056,7 +2075,17 @@ void getRegUsage_ARM64Instr ( HRegUsage* u, const ARM64Instr* i, Bool mode64 )
          addHRegUse(u, HRmWrite, hregARM64_X0());
          addHRegUse(u, HRmRead, hregARM64_X2());
          return;
+      case ARM64in_CAS:
+         addHRegUse(u, HRmRead, hregARM64_X3());
+         addHRegUse(u, HRmRead, hregARM64_X5());
+         addHRegUse(u, HRmRead, hregARM64_X7());
+         addHRegUse(u, HRmWrite, hregARM64_X1());
+         /* Pointless to state this since X8 is not available to RA. */
+         addHRegUse(u, HRmWrite, hregARM64_X8());
+         break;
       case ARM64in_MFence:
+         return;
+      case ARM64in_ClrEX:
          return;
       case ARM64in_VLdStH:
          addHRegUse(u, HRmRead, i->ARM64in.VLdStH.rN);
@@ -2316,7 +2345,11 @@ void mapRegs_ARM64Instr ( HRegRemap* m, ARM64Instr* i, Bool mode64 )
          return;
       case ARM64in_StrEX:
          return;
+      case ARM64in_CAS:
+         return;
       case ARM64in_MFence:
+         return;
+      case ARM64in_ClrEX:
          return;
       case ARM64in_VLdStH:
          i->ARM64in.VLdStH.hD = lookupHRegRemap(m, i->ARM64in.VLdStH.hD);
@@ -3791,18 +3824,71 @@ Int emit_ARM64Instr ( /*MB_MOD*/Bool* is_profInc,
          }
          goto bad;
       }
+      case ARM64in_CAS: {
+         /* This isn't simple.  For an explanation see the comment in
+            host_arm64_defs.h on the the definition of ARM64Instr case
+            CAS. */
+         /* Generate:
+              -- one of:
+              mov     x8, x5                 // AA0503E8
+              and     x8, x5, #0xFFFFFFFF    // 92407CA8
+              and     x8, x5, #0xFFFF        // 92403CA8
+              and     x8, x5, #0xFF          // 92401CA8
+
+              -- one of:
+              ldxr    x1, [x3]               // C85F7C61
+              ldxr    w1, [x3]               // 885F7C61
+              ldxrh   w1, [x3]               // 485F7C61 
+              ldxrb   w1, [x3]               // 085F7C61
+
+              -- always:
+              cmp     x1, x8                 // EB08003F
+              bne     out                    // 54000061
+
+              -- one of:
+              stxr    w1, x7, [x3]           // C8017C67
+              stxr    w1, w7, [x3]           // 88017C67
+              stxrh   w1, w7, [x3]           // 48017C67
+              stxrb   w1, w7, [x3]           // 08017C67
+
+              -- always:
+              eor     x1, x5, x1             // CA0100A1
+            out:
+         */
+         switch (i->ARM64in.CAS.szB) {
+            case 8:  *p++ = 0xAA0503E8; break;
+            case 4:  *p++ = 0x92407CA8; break;
+            case 2:  *p++ = 0x92403CA8; break;
+            case 1:  *p++ = 0x92401CA8; break;
+            default: vassert(0);
+         }
+         switch (i->ARM64in.CAS.szB) {
+            case 8:  *p++ = 0xC85F7C61; break;
+            case 4:  *p++ = 0x885F7C61; break;
+            case 2:  *p++ = 0x485F7C61; break;
+            case 1:  *p++ = 0x085F7C61; break;
+         }
+         *p++ = 0xEB08003F;
+         *p++ = 0x54000061;
+         switch (i->ARM64in.CAS.szB) {
+            case 8:  *p++ = 0xC8017C67; break;
+            case 4:  *p++ = 0x88017C67; break;
+            case 2:  *p++ = 0x48017C67; break;
+            case 1:  *p++ = 0x08017C67; break;
+         }
+         *p++ = 0xCA0100A1;
+         goto done;
+      }
       case ARM64in_MFence: {
          *p++ = 0xD5033F9F; /* DSB sy */
          *p++ = 0xD5033FBF; /* DMB sy */
          *p++ = 0xD5033FDF; /* ISB */
          goto done;
       }
-      //case ARM64in_CLREX: {
-      //   //ATC, but believed to be correct
-      //   goto bad;
-      //   *p++ = 0xD5033F5F; /* clrex */
-      //   goto done;
-      //}
+      case ARM64in_ClrEX: {
+         *p++ = 0xD5033F5F; /* clrex #15 */
+         goto done;
+      }
       case ARM64in_VLdStH: {
          /* 01 111101 01 imm12 n t   LDR Ht, [Xn|SP, #imm12 * 2]
             01 111101 00 imm12 n t   STR Ht, [Xn|SP, #imm12 * 2]

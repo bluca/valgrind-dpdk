@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2011-2015 Petr Pavlu
+   Copyright (C) 2011-2017 Petr Pavlu
       setup@dagobah.cz
 
    This program is free software; you can redistribute it and/or
@@ -28,7 +28,7 @@
    The GNU General Public License is contained in the file COPYING.
 */
 
-/* Copyright 2013-2015, Ivo Raisr <ivosh@ivosh.net>. */
+/* Copyright 2013-2017, Ivo Raisr <ivosh@ivosh.net>. */
 
 /* Copyright 2013, OmniTI Computer Consulting, Inc. All rights reserved. */
 
@@ -138,13 +138,13 @@
 #define __NR_getdents                   SYS_getdents
 #define __NR_privsys                    SYS_privsys
 #define __NR_ucredsys                   SYS_ucredsys
-//#define __NR_sysfs                      SYS_sysfs
+#define __NR_sysfs                      SYS_sysfs
 #define __NR_getmsg                     SYS_getmsg
 #define __NR_putmsg                     SYS_putmsg
 #define __NR_setgroups                  SYS_setgroups
 #define __NR_getgroups                  SYS_getgroups
 #define __NR_sigprocmask                SYS_sigprocmask
-//#define __NR_sigsuspend                 SYS_sigsuspend
+#define __NR_sigsuspend                 SYS_sigsuspend
 #define __NR_sigaltstack                SYS_sigaltstack
 #define __NR_sigaction                  SYS_sigaction
 #define __NR_sigpending                 SYS_sigpending
@@ -157,7 +157,7 @@
 #define __NR_nfssys                     SYS_nfssys
 #define __NR_waitid                     SYS_waitid
 #define __NR_waitsys                    SYS_waitsys /* = SYS_waitid (historical) */
-//#define __NR_sigsendsys                 SYS_sigsendsys
+#define __NR_sigsendsys                 SYS_sigsendsys
 //#define __NR_hrtsys                     SYS_hrtsys
 #if defined(SOLARIS_UTIMESYS_SYSCALL)
 #define __NR_utimesys                   SYS_utimesys
@@ -174,7 +174,7 @@
 #define __NR_munmap                     SYS_munmap
 //#define __NR_fpathconf                  SYS_fpathconf
 //#define __NR_vfork                      SYS_vfork
-//#define __NR_fchdir                     SYS_fchdir
+#define __NR_fchdir                     SYS_fchdir
 #define __NR_readv                      SYS_readv
 #define __NR_writev                     SYS_writev
 #if defined(SOLARIS_UUIDSYS_SYSCALL)
@@ -194,6 +194,9 @@
 //#define __NR_sharefs                    SYS_sharefs
 #define __NR_seteuid                    SYS_seteuid
 #define __NR_forksys                    SYS_forksys
+#if defined(SOLARIS_GETRANDOM_SYSCALL)
+#define __NR_getrandom                  SYS_getrandom
+#endif /* SOLARIS_GETRANDOM_SYSCALL */
 #define __NR_sigtimedwait               SYS_sigtimedwait
 //#define __NR_lwp_info                   SYS_lwp_info
 #define __NR_yield                      SYS_yield
@@ -201,8 +204,11 @@
 #define __NR_lwp_sema_trywait           SYS_lwp_sema_trywait
 #define __NR_lwp_detach                 SYS_lwp_detach
 //#define __NR_corectl                    SYS_corectl
-//#define __NR_modctl                     SYS_modctl
+#define __NR_modctl                     SYS_modctl
 #define __NR_fchroot                    SYS_fchroot
+#if defined(SOLARIS_SYSTEM_STATS_SYSCALL)
+#define __NR_system_stats               SYS_system_stats
+#endif /* SOLARIS_SYSTEM_STATS_SYSCALL */
 //#define __NR_vhangup                    SYS_vhangup
 #define __NR_gettimeofday               SYS_gettimeofday
 #define __NR_getitimer                  SYS_getitimer
@@ -221,8 +227,8 @@
 #define __NR_lwp_private                SYS_lwp_private
 #define __NR_lwp_wait                   SYS_lwp_wait
 #define __NR_lwp_mutex_wakeup           SYS_lwp_mutex_wakeup
-//#define __NR_lwp_cond_wait              SYS_lwp_cond_wait
-//#define __NR_lwp_cond_signal            SYS_lwp_cond_signal
+#define __NR_lwp_cond_wait              SYS_lwp_cond_wait
+#define __NR_lwp_cond_signal            SYS_lwp_cond_signal
 #define __NR_lwp_cond_broadcast         SYS_lwp_cond_broadcast
 #define __NR_pread                      SYS_pread
 #define __NR_pwrite                     SYS_pwrite
@@ -231,8 +237,7 @@
 //#define __NR_brand                      SYS_brand
 //#define __NR_kaio                       SYS_kaio
 //#define __NR_cpc                        SYS_cpc
-//#define __NR_lgrpsys                    SYS_lgrpsys
-//#define __NR_meminfosys                 SYS_meminfosys /* = SYS_lgrpsys */
+#define __NR_lgrpsys                    SYS_lgrpsys
 #define __NR_rusagesys                  SYS_rusagesys
 #define __NR_port                       SYS_port
 #define __NR_pollsys                    SYS_pollsys
@@ -259,7 +264,7 @@
 //#define __NR_install_utrap              SYS_install_utrap
 //#define __NR_signotify                  SYS_signotify
 #define __NR_schedctl                   SYS_schedctl
-//#define __NR_pset                       SYS_pset
+#define __NR_pset                       SYS_pset
 //#define SYS_sparc_utrap_install
 #define __NR_resolvepath                SYS_resolvepath
 #define __NR_lwp_mutex_timedlock        SYS_lwp_mutex_timedlock
@@ -348,10 +353,8 @@
    VG_SOLARIS_SYSCALL_CONSTRUCT_FASTTRAP(T_GETHRVTIME)
 #define __NR_gethrestime \
    VG_SOLARIS_SYSCALL_CONSTRUCT_FASTTRAP(T_GETHRESTIME)
-/*
 #define __NR_getlgrp \
    VG_SOLARIS_SYSCALL_CONSTRUCT_FASTTRAP(T_GETLGRP)
-*/
 #if defined(SOLARIS_GETHRT_FASTTRAP)
 #define __NR_gethrt \
    VG_SOLARIS_SYSCALL_CONSTRUCT_FASTTRAP(T_GETHRT)

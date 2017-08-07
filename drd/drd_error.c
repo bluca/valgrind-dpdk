@@ -1,7 +1,7 @@
 /*
   This file is part of drd, a thread error detector.
 
-  Copyright (C) 2006-2015 Bart Van Assche <bvanassche@acm.org>.
+  Copyright (C) 2006-2017 Bart Van Assche <bvanassche@acm.org>.
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License as
@@ -32,7 +32,6 @@
 #include "pub_tool_basics.h"
 #include "pub_tool_libcassert.h"  /* tl_assert()              */
 #include "pub_tool_libcbase.h"    /* strlen()                 */
-#include "pub_tool_libcfile.h"    /* VG_(get_startup_wd)()    */
 #include "pub_tool_libcprint.h"   /* VG_(printf)()            */
 #include "pub_tool_machine.h"
 #include "pub_tool_mallocfree.h"  /* VG_(malloc), VG_(free)   */

@@ -9,7 +9,7 @@
    This file is part of MemCheck, a heavyweight Valgrind tool for
    detecting memory errors.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -43,6 +43,6 @@
 #define RECORD_OVERLAP_ERROR(s, src, dst, len)                  \
   VALGRIND_DO_CLIENT_REQUEST_STMT(                              \
                   _VG_USERREQ__MEMCHECK_RECORD_OVERLAP_ERROR,   \
-                  s, src, dst, len, 0, 0)
+                  s, src, dst, len, 0)
 
 #include "../shared/vg_replace_strmem.c"

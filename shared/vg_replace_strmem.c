@@ -8,7 +8,7 @@
 /*
    This file is part of Valgrind.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -247,12 +247,16 @@ static inline void my_exit ( int x )
  STRCHR(VG_Z_LIBC_SONAME,          __strchr_sse2)
  STRCHR(VG_Z_LIBC_SONAME,          __strchr_sse2_no_bsf)
  STRCHR(VG_Z_LIBC_SONAME,          index)
-# if !defined(VGP_x86_linux)
+# if !defined(VGP_x86_linux) && !defined(VGP_amd64_linux)
   STRCHR(VG_Z_LD_LINUX_SO_2,        strchr)
   STRCHR(VG_Z_LD_LINUX_SO_2,        index)
   STRCHR(VG_Z_LD_LINUX_X86_64_SO_2, strchr)
   STRCHR(VG_Z_LD_LINUX_X86_64_SO_2, index)
 # endif
+
+#if defined(VGPV_mips32_linux_android)
+  STRCHR(NONE,        __dl_strchr)
+#endif
 
 #elif defined(VGO_darwin)
  STRCHR(VG_Z_LIBC_SONAME, strchr)
@@ -1040,6 +1044,7 @@ static inline void my_exit ( int x )
 
 #elif defined(VGO_solaris)
  MEMCPY(VG_Z_LIBC_SONAME,  memcpy)
+ MEMCPY(VG_Z_LIBC_SONAME,  memcpyZPZa)
  MEMCPY(VG_Z_LD_SO_1,      memcpy)
 
 #endif
@@ -1187,9 +1192,9 @@ static inline void my_exit ( int x )
    pointless. */
 
 #define MEMSET(soname, fnname) \
-   void* VG_REPLACE_FUNCTION_EZU(20210,soname,fnname) \
+   void* VG_REPLACE_FUNCTION_EZZ(20210,soname,fnname) \
             (void *s, Int c, SizeT n); \
-   void* VG_REPLACE_FUNCTION_EZU(20210,soname,fnname) \
+   void* VG_REPLACE_FUNCTION_EZZ(20210,soname,fnname) \
             (void *s, Int c, SizeT n) \
    { \
       if (sizeof(void*) == 8) { \
@@ -1200,6 +1205,11 @@ static inline void my_exit ( int x )
          c8 = (c8 << 32) | c8; \
          while ((a & 7) != 0 && n >= 1) \
             { *(UChar*)a = (UChar)c; a += 1; n -= 1; } \
+         while (n >= 32) \
+            { *(ULong*)a = c8; a += 8; n -= 8;   \
+              *(ULong*)a = c8; a += 8; n -= 8;   \
+              *(ULong*)a = c8; a += 8; n -= 8;   \
+              *(ULong*)a = c8; a += 8; n -= 8; } \
          while (n >= 8) \
             { *(ULong*)a = c8; a += 8; n -= 8; } \
          while (n >= 1) \
@@ -1212,6 +1222,11 @@ static inline void my_exit ( int x )
          c4 = (c4 << 16) | c4; \
          while ((a & 3) != 0 && n >= 1) \
             { *(UChar*)a = (UChar)c; a += 1; n -= 1; } \
+         while (n >= 16) \
+            { *(UInt*)a = c4; a += 4; n -= 4;   \
+              *(UInt*)a = c4; a += 4; n -= 4;   \
+              *(UInt*)a = c4; a += 4; n -= 4;   \
+              *(UInt*)a = c4; a += 4; n -= 4; } \
          while (n >= 4) \
             { *(UInt*)a = c4; a += 4; n -= 4; } \
          while (n >= 1) \
@@ -1230,6 +1245,7 @@ static inline void my_exit ( int x )
 
 #elif defined(VGO_solaris)
  MEMSET(VG_Z_LIBC_SONAME, memset)
+ MEMSET(VG_Z_LIBC_SONAME, memsetZPZa)
 
 #endif
 
@@ -1259,6 +1275,7 @@ static inline void my_exit ( int x )
 
 #elif defined(VGO_solaris)
  MEMMOVE(VG_Z_LIBC_SONAME, memmove)
+ MEMMOVE(VG_Z_LIBC_SONAME, memmoveZPZa)
  MEMMOVE(VG_Z_LD_SO_1,     memmove)
 
 #endif
@@ -1704,6 +1721,7 @@ static inline void my_exit ( int x )
 
 #if defined(VGO_linux)
  STRCSPN(VG_Z_LIBC_SONAME,          strcspn)
+ STRCSPN(VG_Z_LIBC_SONAME,          __GI_strcspn)
 
 #elif defined(VGO_darwin)
 

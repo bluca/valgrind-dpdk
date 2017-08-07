@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -32,6 +32,7 @@
 #define __PUB_TOOL_REDIR_H
 
 #include "config.h"           /* DARWIN_VERS */
+#include "pub_tool_basics.h"  // Bool and HChar
 
 /* The following macros facilitate function replacement and wrapping.
 
@@ -184,9 +185,10 @@
      @         -->  ZA    (at)
      $         -->  ZD    (dollar)
      (         -->  ZL    (left)
+     %         -->  ZP    (percent)
      )         -->  ZR    (right)
+     /         -->  ZS    (slash) 
      Z         -->  ZZ    (Z)
-     /         -->  ZS    (slash)
 
    Everything else is left unchanged.
 */
@@ -242,8 +244,11 @@
 /* --- Soname of the standard C library. --- */
 
 #if defined(VGO_linux) || defined(VGO_solaris)
+# if defined(MUSL_LIBC)
+#  define  VG_Z_LIBC_SONAME  libcZdZa              // libc.*
+#else
 #  define  VG_Z_LIBC_SONAME  libcZdsoZa              // libc.so*
-
+#endif
 #elif defined(VGO_darwin) && (DARWIN_VERS <= DARWIN_10_6)
 #  define  VG_Z_LIBC_SONAME  libSystemZdZaZddylib    // libSystem.*.dylib
 
@@ -274,7 +279,11 @@
 /* --- Soname of the pthreads library. --- */
 
 #if defined(VGO_linux)
+# if defined(MUSL_LIBC)
+#  define  VG_Z_LIBPTHREAD_SONAME  libcZdZa              // libc.*
+#else
 #  define  VG_Z_LIBPTHREAD_SONAME  libpthreadZdsoZd0     // libpthread.so.0
+#endif
 #elif defined(VGO_darwin)
 #  define  VG_Z_LIBPTHREAD_SONAME  libSystemZdZaZddylib  // libSystem.*.dylib
 #elif defined(VGO_solaris)
@@ -345,10 +354,13 @@
 #define VG_SO_SYN_PREFIX     "VgSoSyn"
 #define VG_SO_SYN_PREFIX_LEN 7
 
-// Prefixes for Intel DPDK libraries, first wildcard matches architecture
-#define VG_Z_DPDK_SONAME  libZadpdkZdsoZa     // lib*dpdk.so*
-#define VG_Z_RTE_SONAME   librteZumallocZdsoZa  // librte_malloc.so*
-#define VG_Z_RTE_EAL_SONAME   librteZuealZdsoZa  // librte_eal.so*
+// Special soname synonym place holder for the malloc symbols that can
+// be replaced using --soname-synonyms.  Otherwise will match all
+// public symbols in any shared library/executable.
+#define SO_SYN_MALLOC VG_SO_SYN(somalloc)
+#define SO_SYN_MALLOC_NAME "VgSoSynsomalloc"
+
+Bool VG_(is_soname_ld_so) (const HChar *soname);
 
 #endif   // __PUB_TOOL_REDIR_H
 

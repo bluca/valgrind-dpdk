@@ -66,6 +66,9 @@ if VGCONF_PLATVARIANT_IS_ANDROID
 valgrind_CFLAGS += -static
 valgrind_LDFLAGS   += -Wl,-z,noexecstack
 endif
+if VGCONF_OS_IS_SOLARIS
+valgrind_LDFLAGS   += -Wl,-M,/usr/lib/ld/map.noexstk
+endif
 
 
 vgdb_SOURCES = vgdb.c
@@ -231,6 +234,8 @@ noinst_HEADERS = \
 	pub_core_vkiscnums_asm.h\
 	pub_core_wordfm.h	\
 	pub_core_xarray.h	\
+	pub_core_xtree.h	\
+	pub_core_xtmemory.h	\
 	m_aspacemgr/priv_aspacemgr.h \
 	m_debuginfo/priv_misc.h	\
 	m_debuginfo/priv_storage.h	\
@@ -329,6 +334,8 @@ COREGRIND_SOURCES_COMMON = \
 	m_vkiscnums.c \
 	m_wordfm.c \
 	m_xarray.c \
+	m_xtree.c \
+	m_xtmemory.c \
 	m_aspacehl.c \
 	m_aspacemgr/aspacemgr-common.c \
 	m_aspacemgr/aspacemgr-linux.c \
@@ -348,11 +355,14 @@ COREGRIND_SOURCES_COMMON = \
 	m_debuginfo/readmacho.c \
 	m_debuginfo/readpdb.c \
 	m_debuginfo/storage.c \
+	m_debuginfo/tinfl.c \
 	m_debuginfo/tytypes.c \
 	m_demangle/cp-demangle.c \
 	m_demangle/cplus-dem.c \
 	m_demangle/demangle.c \
 	m_demangle/dyn-string.c \
+	m_demangle/d-demangle.c \
+	m_demangle/rust-demangle.c \
 	m_demangle/safe-ctype.c \
 	m_dispatch/dispatch-x86-linux.S \
 	m_dispatch/dispatch-amd64-linux.S \
@@ -364,7 +374,6 @@ COREGRIND_SOURCES_COMMON = \
 	m_dispatch/dispatch-s390x-linux.S \
 	m_dispatch/dispatch-mips32-linux.S \
 	m_dispatch/dispatch-mips64-linux.S \
-	m_dispatch/dispatch-tilegx-linux.S \
 	m_dispatch/dispatch-x86-darwin.S \
 	m_dispatch/dispatch-amd64-darwin.S \
 	m_dispatch/dispatch-x86-solaris.S \
@@ -386,7 +395,6 @@ COREGRIND_SOURCES_COMMON = \
 	m_gdbserver/valgrind-low-s390x.c \
 	m_gdbserver/valgrind-low-mips32.c \
 	m_gdbserver/valgrind-low-mips64.c \
-	m_gdbserver/valgrind-low-tilegx.c \
 	m_gdbserver/version.c \
 	m_initimg/initimg-linux.c \
 	m_initimg/initimg-darwin.c \
@@ -411,7 +419,6 @@ COREGRIND_SOURCES_COMMON = \
 	m_sigframe/sigframe-s390x-linux.c \
 	m_sigframe/sigframe-mips32-linux.c \
 	m_sigframe/sigframe-mips64-linux.c \
-	m_sigframe/sigframe-tilegx-linux.c \
 	m_sigframe/sigframe-x86-darwin.c \
 	m_sigframe/sigframe-amd64-darwin.c \
 	m_sigframe/sigframe-solaris.c \
@@ -425,7 +432,6 @@ COREGRIND_SOURCES_COMMON = \
 	m_syswrap/syscall-s390x-linux.S \
 	m_syswrap/syscall-mips32-linux.S \
 	m_syswrap/syscall-mips64-linux.S \
-	m_syswrap/syscall-tilegx-linux.S \
 	m_syswrap/syscall-x86-darwin.S \
 	m_syswrap/syscall-amd64-darwin.S \
 	m_syswrap/syscall-x86-solaris.S \
@@ -445,7 +451,6 @@ COREGRIND_SOURCES_COMMON = \
 	m_syswrap/syswrap-s390x-linux.c \
 	m_syswrap/syswrap-mips32-linux.c \
 	m_syswrap/syswrap-mips64-linux.c \
-	m_syswrap/syswrap-tilegx-linux.c \
 	m_syswrap/syswrap-x86-darwin.c \
 	m_syswrap/syswrap-amd64-darwin.c \
 	m_syswrap/syswrap-xen.c \
@@ -602,12 +607,17 @@ GDBSERVER_XML_FILES = \
 	m_gdbserver/power64-core-valgrind-s1.xml \
 	m_gdbserver/power64-core-valgrind-s2.xml \
 	m_gdbserver/power64-core.xml \
+	m_gdbserver/power64-core2-valgrind-s1.xml \
+	m_gdbserver/power64-core2-valgrind-s2.xml \
 	m_gdbserver/power64-linux-valgrind-s1.xml \
 	m_gdbserver/power64-linux-valgrind-s2.xml \
 	m_gdbserver/power64-linux.xml \
 	m_gdbserver/power-altivec-valgrind-s1.xml \
 	m_gdbserver/power-altivec-valgrind-s2.xml \
 	m_gdbserver/power-altivec.xml \
+	m_gdbserver/power-vsx-valgrind-s1.xml \
+	m_gdbserver/power-vsx-valgrind-s2.xml \
+	m_gdbserver/power-vsx.xml \
 	m_gdbserver/power-core-valgrind-s1.xml \
 	m_gdbserver/power-core-valgrind-s2.xml \
 	m_gdbserver/power-core.xml \

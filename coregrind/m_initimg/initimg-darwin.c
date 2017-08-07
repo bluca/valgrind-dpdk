@@ -8,7 +8,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -428,14 +428,10 @@ Addr setup_client_stack( void*  init_sp,
    *ptr++ = (Addr)(argc + 1);
 
    /* --- client argv --- */
-   if (info->interp_name) {
+   if (info->interp_name)
       *ptr++ = (Addr)copy_str(&strtab, info->interp_name);
-      VG_(free)(info->interp_name);
-   }
-   if (info->interp_args) {
+   if (info->interp_args)
       *ptr++ = (Addr)copy_str(&strtab, info->interp_args);
-      VG_(free)(info->interp_args);
-   }
 
    *ptr++ = (Addr)copy_str(&strtab, VG_(args_the_exename));
 
@@ -566,6 +562,8 @@ IIFinaliseImageInfo VG_(ii_create_image)( IICreateImageInfo iicii,
    // Tell aspacem about commpage, etc
    record_system_memory();
 
+   VG_(free)(info.interp_name); info.interp_name = NULL;
+   VG_(free)(info.interp_args); info.interp_args = NULL;
    return iifii;
 }
 

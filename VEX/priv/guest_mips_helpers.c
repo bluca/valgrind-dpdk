@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2010-2015 RT-RK
+   Copyright (C) 2010-2017 RT-RK
       mips-valgrind@rt-rk.com
 
    This program is free software; you can redistribute it and/or
@@ -165,6 +165,11 @@ void LibVEX_GuestMIPS32_initialise( /*OUT*/ VexGuestMIPS32State * vex_state)
 
    vex_state->guest_COND = 0;
 
+   vex_state->guest_CP0_status = 0;
+
+   vex_state->guest_LLaddr = 0xFFFFFFFF;
+   vex_state->guest_LLdata = 0;
+
    /* MIPS32 DSP ASE(r2) specific registers */
    vex_state->guest_DSPControl = 0;   /* DSPControl register */
    vex_state->guest_ac0 = 0;          /* Accumulator 0 */
@@ -272,6 +277,11 @@ void LibVEX_GuestMIPS64_initialise ( /*OUT*/ VexGuestMIPS64State * vex_state )
    vex_state->guest_NRADDR = 0;
 
    vex_state->guest_COND = 0;
+
+   vex_state->guest_CP0_status = MIPS_CP0_STATUS_FR;
+
+   vex_state->guest_LLaddr = 0xFFFFFFFFFFFFFFFFULL;
+   vex_state->guest_LLdata = 0;
 }
 
 /*-----------------------------------------------------------*/
@@ -414,679 +424,35 @@ VexGuestLayout mips64Guest_layout = {
                   }
 };
 
-#define ASM_VOLATILE_CASE(rd, sel) \
-         case rd: \
-            asm volatile ("mfc0 %0, $" #rd ", "#sel"\n\t" :"=r" (x) ); \
-            break;
+#define ASM_VOLATILE_RDHWR(opcode)                                 \
+   __asm__ __volatile__(".word 0x7C02003B | "#opcode" << 11  \n\t" \
+                        : "+r" (x) : :                             \
+                       )
 
-UInt mips32_dirtyhelper_mfc0(UInt rd, UInt sel)
+HWord mips_dirtyhelper_rdhwr ( UInt rd )
 {
-   UInt x = 0;
-#if defined(__mips__) && ((defined(__mips_isa_rev) && __mips_isa_rev >= 2))
-   switch (sel) {
-      case 0:
-         /* __asm__("mfc0 %0, $1, 0" :"=r" (x)); */
-         switch (rd) {
-            ASM_VOLATILE_CASE(0, 0);
-            ASM_VOLATILE_CASE(1, 0);
-            ASM_VOLATILE_CASE(2, 0);
-            ASM_VOLATILE_CASE(3, 0);
-            ASM_VOLATILE_CASE(4, 0);
-            ASM_VOLATILE_CASE(5, 0);
-            ASM_VOLATILE_CASE(6, 0);
-            ASM_VOLATILE_CASE(7, 0);
-            ASM_VOLATILE_CASE(8, 0);
-            ASM_VOLATILE_CASE(9, 0);
-            ASM_VOLATILE_CASE(10, 0);
-            ASM_VOLATILE_CASE(11, 0);
-            ASM_VOLATILE_CASE(12, 0);
-            ASM_VOLATILE_CASE(13, 0);
-            ASM_VOLATILE_CASE(14, 0);
-            ASM_VOLATILE_CASE(15, 0);
-            ASM_VOLATILE_CASE(16, 0);
-            ASM_VOLATILE_CASE(17, 0);
-            ASM_VOLATILE_CASE(18, 0);
-            ASM_VOLATILE_CASE(19, 0);
-            ASM_VOLATILE_CASE(20, 0);
-            ASM_VOLATILE_CASE(21, 0);
-            ASM_VOLATILE_CASE(22, 0);
-            ASM_VOLATILE_CASE(23, 0);
-            ASM_VOLATILE_CASE(24, 0);
-            ASM_VOLATILE_CASE(25, 0);
-            ASM_VOLATILE_CASE(26, 0);
-            ASM_VOLATILE_CASE(27, 0);
-            ASM_VOLATILE_CASE(28, 0);
-            ASM_VOLATILE_CASE(29, 0);
-            ASM_VOLATILE_CASE(30, 0);
-            ASM_VOLATILE_CASE(31, 0);
-         default:
-            break;
-         }
-         break;
-      case 1:
-         /* __asm__("mfc0 %0, $1, 0" :"=r" (x)); */
-         switch (rd) {
-            ASM_VOLATILE_CASE(0, 1);
-            ASM_VOLATILE_CASE(1, 1);
-            ASM_VOLATILE_CASE(2, 1);
-            ASM_VOLATILE_CASE(3, 1);
-            ASM_VOLATILE_CASE(4, 1);
-            ASM_VOLATILE_CASE(5, 1);
-            ASM_VOLATILE_CASE(6, 1);
-            ASM_VOLATILE_CASE(7, 1);
-            ASM_VOLATILE_CASE(8, 1);
-            ASM_VOLATILE_CASE(9, 1);
-            ASM_VOLATILE_CASE(10, 1);
-            ASM_VOLATILE_CASE(11, 1);
-            ASM_VOLATILE_CASE(12, 1);
-            ASM_VOLATILE_CASE(13, 1);
-            ASM_VOLATILE_CASE(14, 1);
-            ASM_VOLATILE_CASE(15, 1);
-            ASM_VOLATILE_CASE(16, 1);
-            ASM_VOLATILE_CASE(17, 1);
-            ASM_VOLATILE_CASE(18, 1);
-            ASM_VOLATILE_CASE(19, 1);
-            ASM_VOLATILE_CASE(20, 1);
-            ASM_VOLATILE_CASE(21, 1);
-            ASM_VOLATILE_CASE(22, 1);
-            ASM_VOLATILE_CASE(23, 1);
-            ASM_VOLATILE_CASE(24, 1);
-            ASM_VOLATILE_CASE(25, 1);
-            ASM_VOLATILE_CASE(26, 1);
-            ASM_VOLATILE_CASE(27, 1);
-            ASM_VOLATILE_CASE(28, 1);
-            ASM_VOLATILE_CASE(29, 1);
-            ASM_VOLATILE_CASE(30, 1);
-            ASM_VOLATILE_CASE(31, 1);
-         default:
-            break;
-         }
-         break;
-      case 2:
-         /* __asm__("mfc0 %0, $1, 0" :"=r" (x)); */
-         switch (rd) {
-            ASM_VOLATILE_CASE(0, 2);
-            ASM_VOLATILE_CASE(1, 2);
-            ASM_VOLATILE_CASE(2, 2);
-            ASM_VOLATILE_CASE(3, 1);
-            ASM_VOLATILE_CASE(4, 2);
-            ASM_VOLATILE_CASE(5, 2);
-            ASM_VOLATILE_CASE(6, 2);
-            ASM_VOLATILE_CASE(7, 2);
-            ASM_VOLATILE_CASE(8, 2);
-            ASM_VOLATILE_CASE(9, 2);
-            ASM_VOLATILE_CASE(10, 2);
-            ASM_VOLATILE_CASE(11, 2);
-            ASM_VOLATILE_CASE(12, 2);
-            ASM_VOLATILE_CASE(13, 2);
-            ASM_VOLATILE_CASE(14, 2);
-            ASM_VOLATILE_CASE(15, 2);
-            ASM_VOLATILE_CASE(16, 2);
-            ASM_VOLATILE_CASE(17, 2);
-            ASM_VOLATILE_CASE(18, 2);
-            ASM_VOLATILE_CASE(19, 2);
-            ASM_VOLATILE_CASE(20, 2);
-            ASM_VOLATILE_CASE(21, 2);
-            ASM_VOLATILE_CASE(22, 2);
-            ASM_VOLATILE_CASE(23, 2);
-            ASM_VOLATILE_CASE(24, 2);
-            ASM_VOLATILE_CASE(25, 2);
-            ASM_VOLATILE_CASE(26, 2);
-            ASM_VOLATILE_CASE(27, 2);
-            ASM_VOLATILE_CASE(28, 2);
-            ASM_VOLATILE_CASE(29, 2);
-            ASM_VOLATILE_CASE(30, 2);
-            ASM_VOLATILE_CASE(31, 2);
-         default:
-            break;
-         }
-         break;
-      case 3:
-         /* __asm__("mfc0 %0, $1, 0" :"=r" (x)); */
-         switch (rd) {
-            ASM_VOLATILE_CASE(0, 3);
-            ASM_VOLATILE_CASE(1, 3);
-            ASM_VOLATILE_CASE(2, 3);
-            ASM_VOLATILE_CASE(3, 3);
-            ASM_VOLATILE_CASE(4, 3);
-            ASM_VOLATILE_CASE(5, 3);
-            ASM_VOLATILE_CASE(6, 3);
-            ASM_VOLATILE_CASE(7, 3);
-            ASM_VOLATILE_CASE(8, 3);
-            ASM_VOLATILE_CASE(9, 3);
-            ASM_VOLATILE_CASE(10, 3);
-            ASM_VOLATILE_CASE(11, 3);
-            ASM_VOLATILE_CASE(12, 3);
-            ASM_VOLATILE_CASE(13, 3);
-            ASM_VOLATILE_CASE(14, 3);
-            ASM_VOLATILE_CASE(15, 3);
-            ASM_VOLATILE_CASE(16, 3);
-            ASM_VOLATILE_CASE(17, 3);
-            ASM_VOLATILE_CASE(18, 3);
-            ASM_VOLATILE_CASE(19, 3);
-            ASM_VOLATILE_CASE(20, 3);
-            ASM_VOLATILE_CASE(21, 3);
-            ASM_VOLATILE_CASE(22, 3);
-            ASM_VOLATILE_CASE(23, 3);
-            ASM_VOLATILE_CASE(24, 3);
-            ASM_VOLATILE_CASE(25, 3);
-            ASM_VOLATILE_CASE(26, 3);
-            ASM_VOLATILE_CASE(27, 3);
-            ASM_VOLATILE_CASE(28, 3);
-            ASM_VOLATILE_CASE(29, 3);
-            ASM_VOLATILE_CASE(30, 3);
-            ASM_VOLATILE_CASE(31, 3);
-         default:
-            break;
-         }
-         break;
-      case 4:
-         /* __asm__("mfc0 %0, $1, 0" :"=r" (x)); */
-         switch (rd) {
-            ASM_VOLATILE_CASE(0, 4);
-            ASM_VOLATILE_CASE(1, 4);
-            ASM_VOLATILE_CASE(2, 4);
-            ASM_VOLATILE_CASE(3, 4);
-            ASM_VOLATILE_CASE(4, 4);
-            ASM_VOLATILE_CASE(5, 4);
-            ASM_VOLATILE_CASE(6, 4);
-            ASM_VOLATILE_CASE(7, 4);
-            ASM_VOLATILE_CASE(8, 4);
-            ASM_VOLATILE_CASE(9, 4);
-            ASM_VOLATILE_CASE(10, 4);
-            ASM_VOLATILE_CASE(11, 4);
-            ASM_VOLATILE_CASE(12, 4);
-            ASM_VOLATILE_CASE(13, 4);
-            ASM_VOLATILE_CASE(14, 4);
-            ASM_VOLATILE_CASE(15, 4);
-            ASM_VOLATILE_CASE(16, 4);
-            ASM_VOLATILE_CASE(17, 4);
-            ASM_VOLATILE_CASE(18, 4);
-            ASM_VOLATILE_CASE(19, 4);
-            ASM_VOLATILE_CASE(20, 4);
-            ASM_VOLATILE_CASE(21, 4);
-            ASM_VOLATILE_CASE(22, 4);
-            ASM_VOLATILE_CASE(23, 4);
-            ASM_VOLATILE_CASE(24, 4);
-            ASM_VOLATILE_CASE(25, 4);
-            ASM_VOLATILE_CASE(26, 4);
-            ASM_VOLATILE_CASE(27, 4);
-            ASM_VOLATILE_CASE(28, 4);
-            ASM_VOLATILE_CASE(29, 4);
-            ASM_VOLATILE_CASE(30, 4);
-            ASM_VOLATILE_CASE(31, 4);
-         default:
-            break;
-         }
-         break;
-      case 5:
-         /* __asm__("mfc0 %0, $1, 0" :"=r" (x)); */
-         switch (rd) {
-            ASM_VOLATILE_CASE(0, 5);
-            ASM_VOLATILE_CASE(1, 5);
-            ASM_VOLATILE_CASE(2, 5);
-            ASM_VOLATILE_CASE(3, 5);
-            ASM_VOLATILE_CASE(4, 5);
-            ASM_VOLATILE_CASE(5, 5);
-            ASM_VOLATILE_CASE(6, 5);
-            ASM_VOLATILE_CASE(7, 5);
-            ASM_VOLATILE_CASE(8, 5);
-            ASM_VOLATILE_CASE(9, 5);
-            ASM_VOLATILE_CASE(10, 5);
-            ASM_VOLATILE_CASE(11, 5);
-            ASM_VOLATILE_CASE(12, 5);
-            ASM_VOLATILE_CASE(13, 5);
-            ASM_VOLATILE_CASE(14, 5);
-            ASM_VOLATILE_CASE(15, 5);
-            ASM_VOLATILE_CASE(16, 5);
-            ASM_VOLATILE_CASE(17, 5);
-            ASM_VOLATILE_CASE(18, 5);
-            ASM_VOLATILE_CASE(19, 5);
-            ASM_VOLATILE_CASE(20, 5);
-            ASM_VOLATILE_CASE(21, 5);
-            ASM_VOLATILE_CASE(22, 5);
-            ASM_VOLATILE_CASE(23, 5);
-            ASM_VOLATILE_CASE(24, 5);
-            ASM_VOLATILE_CASE(25, 5);
-            ASM_VOLATILE_CASE(26, 5);
-            ASM_VOLATILE_CASE(27, 5);
-            ASM_VOLATILE_CASE(28, 5);
-            ASM_VOLATILE_CASE(29, 5);
-            ASM_VOLATILE_CASE(30, 5);
-            ASM_VOLATILE_CASE(31, 5);
-         default:
-            break;
-         }
-         break;
-      case 6:
-         /* __asm__("mfc0 %0, $1, 0" :"=r" (x)); */
-         switch (rd) {
-            ASM_VOLATILE_CASE(0, 6);
-            ASM_VOLATILE_CASE(1, 6);
-            ASM_VOLATILE_CASE(2, 6);
-            ASM_VOLATILE_CASE(3, 6);
-            ASM_VOLATILE_CASE(4, 6);
-            ASM_VOLATILE_CASE(5, 6);
-            ASM_VOLATILE_CASE(6, 6);
-            ASM_VOLATILE_CASE(7, 6);
-            ASM_VOLATILE_CASE(8, 6);
-            ASM_VOLATILE_CASE(9, 6);
-            ASM_VOLATILE_CASE(10, 6);
-            ASM_VOLATILE_CASE(11, 6);
-            ASM_VOLATILE_CASE(12, 6);
-            ASM_VOLATILE_CASE(13, 6);
-            ASM_VOLATILE_CASE(14, 6);
-            ASM_VOLATILE_CASE(15, 6);
-            ASM_VOLATILE_CASE(16, 6);
-            ASM_VOLATILE_CASE(17, 6);
-            ASM_VOLATILE_CASE(18, 6);
-            ASM_VOLATILE_CASE(19, 6);
-            ASM_VOLATILE_CASE(20, 6);
-            ASM_VOLATILE_CASE(21, 6);
-            ASM_VOLATILE_CASE(22, 6);
-            ASM_VOLATILE_CASE(23, 6);
-            ASM_VOLATILE_CASE(24, 6);
-            ASM_VOLATILE_CASE(25, 6);
-            ASM_VOLATILE_CASE(26, 6);
-            ASM_VOLATILE_CASE(27, 6);
-            ASM_VOLATILE_CASE(28, 6);
-            ASM_VOLATILE_CASE(29, 6);
-            ASM_VOLATILE_CASE(30, 6);
-            ASM_VOLATILE_CASE(31, 6);
-         default:
-            break;
-         }
-         break;
-      case 7:
-         /* __asm__("mfc0 %0, $1, 0" :"=r" (x)); */
-         switch (rd) {
-            ASM_VOLATILE_CASE(0, 7);
-            ASM_VOLATILE_CASE(1, 7);
-            ASM_VOLATILE_CASE(2, 7);
-            ASM_VOLATILE_CASE(3, 7);
-            ASM_VOLATILE_CASE(4, 7);
-            ASM_VOLATILE_CASE(5, 7);
-            ASM_VOLATILE_CASE(6, 7);
-            ASM_VOLATILE_CASE(7, 7);
-            ASM_VOLATILE_CASE(8, 7);
-            ASM_VOLATILE_CASE(9, 7);
-            ASM_VOLATILE_CASE(10, 7);
-            ASM_VOLATILE_CASE(11, 7);
-            ASM_VOLATILE_CASE(12, 7);
-            ASM_VOLATILE_CASE(13, 7);
-            ASM_VOLATILE_CASE(14, 7);
-            ASM_VOLATILE_CASE(15, 7);
-            ASM_VOLATILE_CASE(16, 7);
-            ASM_VOLATILE_CASE(17, 7);
-            ASM_VOLATILE_CASE(18, 7);
-            ASM_VOLATILE_CASE(19, 7);
-            ASM_VOLATILE_CASE(20, 7);
-            ASM_VOLATILE_CASE(21, 7);
-            ASM_VOLATILE_CASE(22, 7);
-            ASM_VOLATILE_CASE(23, 7);
-            ASM_VOLATILE_CASE(24, 7);
-            ASM_VOLATILE_CASE(25, 7);
-            ASM_VOLATILE_CASE(26, 7);
-            ASM_VOLATILE_CASE(27, 7);
-            ASM_VOLATILE_CASE(28, 7);
-            ASM_VOLATILE_CASE(29, 7);
-            ASM_VOLATILE_CASE(30, 7);
-            ASM_VOLATILE_CASE(31, 7);
-         default:
-            break;
-         }
-      break;
+#if defined(__mips__)
+   register HWord x __asm__("v0") = 0;
 
-   default:
-      break;
-   }
-#endif
-   return x;
-}
-
-#undef ASM_VOLATILE_CASE
-
-#define ASM_VOLATILE_CASE(rd, sel) \
-         case rd: \
-            asm volatile ("dmfc0 %0, $" #rd ", "#sel"\n\t" :"=r" (x) ); \
-            break;
-
-ULong mips64_dirtyhelper_dmfc0 ( UInt rd, UInt sel )
-{
-   ULong x = 0;
-#if defined(VGP_mips64_linux)
-   switch (sel) {
-     case 0:
-        /* __asm__("dmfc0 %0, $1, 0" :"=r" (x)); */
-        switch (rd) {
-           ASM_VOLATILE_CASE (0, 0);
-           ASM_VOLATILE_CASE (1, 0);
-           ASM_VOLATILE_CASE (2, 0);
-           ASM_VOLATILE_CASE (3, 0);
-           ASM_VOLATILE_CASE (4, 0);
-           ASM_VOLATILE_CASE (5, 0);
-           ASM_VOLATILE_CASE (6, 0);
-           ASM_VOLATILE_CASE (7, 0);
-           ASM_VOLATILE_CASE (8, 0);
-           ASM_VOLATILE_CASE (9, 0);
-           ASM_VOLATILE_CASE (10, 0);
-           ASM_VOLATILE_CASE (11, 0);
-           ASM_VOLATILE_CASE (12, 0);
-           ASM_VOLATILE_CASE (13, 0);
-           ASM_VOLATILE_CASE (14, 0);
-           ASM_VOLATILE_CASE (15, 0);
-           ASM_VOLATILE_CASE (16, 0);
-           ASM_VOLATILE_CASE (17, 0);
-           ASM_VOLATILE_CASE (18, 0);
-           ASM_VOLATILE_CASE (19, 0);
-           ASM_VOLATILE_CASE (20, 0);
-           ASM_VOLATILE_CASE (21, 0);
-           ASM_VOLATILE_CASE (22, 0);
-           ASM_VOLATILE_CASE (23, 0);
-           ASM_VOLATILE_CASE (24, 0);
-           ASM_VOLATILE_CASE (25, 0);
-           ASM_VOLATILE_CASE (26, 0);
-           ASM_VOLATILE_CASE (27, 0);
-           ASM_VOLATILE_CASE (28, 0);
-           ASM_VOLATILE_CASE (29, 0);
-           ASM_VOLATILE_CASE (30, 0);
-           ASM_VOLATILE_CASE (31, 0);
-         default:
-           break;
-        }
-        break;
-     case 1:
-        /* __asm__("dmfc0 %0, $1, 0" :"=r" (x)); */
-        switch (rd) {
-           ASM_VOLATILE_CASE (0, 1);
-           ASM_VOLATILE_CASE (1, 1);
-           ASM_VOLATILE_CASE (2, 1);
-           ASM_VOLATILE_CASE (3, 1);
-           ASM_VOLATILE_CASE (4, 1);
-           ASM_VOLATILE_CASE (5, 1);
-           ASM_VOLATILE_CASE (6, 1);
-           ASM_VOLATILE_CASE (7, 1);
-           ASM_VOLATILE_CASE (8, 1);
-           ASM_VOLATILE_CASE (9, 1);
-           ASM_VOLATILE_CASE (10, 1);
-           ASM_VOLATILE_CASE (11, 1);
-           ASM_VOLATILE_CASE (12, 1);
-           ASM_VOLATILE_CASE (13, 1);
-           ASM_VOLATILE_CASE (14, 1);
-           ASM_VOLATILE_CASE (15, 1);
-           ASM_VOLATILE_CASE (16, 1);
-           ASM_VOLATILE_CASE (17, 1);
-           ASM_VOLATILE_CASE (18, 1);
-           ASM_VOLATILE_CASE (19, 1);
-           ASM_VOLATILE_CASE (20, 1);
-           ASM_VOLATILE_CASE (21, 1);
-           ASM_VOLATILE_CASE (22, 1);
-           ASM_VOLATILE_CASE (23, 1);
-           ASM_VOLATILE_CASE (24, 1);
-           ASM_VOLATILE_CASE (25, 1);
-           ASM_VOLATILE_CASE (26, 1);
-           ASM_VOLATILE_CASE (27, 1);
-           ASM_VOLATILE_CASE (28, 1);
-           ASM_VOLATILE_CASE (29, 1);
-           ASM_VOLATILE_CASE (30, 1);
-           ASM_VOLATILE_CASE (31, 1);
-        default:
-           break;
-        }
-        break;
-     case 2:
-        /* __asm__("dmfc0 %0, $1, 0" :"=r" (x)); */
-        switch (rd) {
-           ASM_VOLATILE_CASE (0, 2);
-           ASM_VOLATILE_CASE (1, 2);
-           ASM_VOLATILE_CASE (2, 2);
-           ASM_VOLATILE_CASE (3, 1);
-           ASM_VOLATILE_CASE (4, 2);
-           ASM_VOLATILE_CASE (5, 2);
-           ASM_VOLATILE_CASE (6, 2);
-           ASM_VOLATILE_CASE (7, 2);
-           ASM_VOLATILE_CASE (8, 2);
-           ASM_VOLATILE_CASE (9, 2);
-           ASM_VOLATILE_CASE (10, 2);
-           ASM_VOLATILE_CASE (11, 2);
-           ASM_VOLATILE_CASE (12, 2);
-           ASM_VOLATILE_CASE (13, 2);
-           ASM_VOLATILE_CASE (14, 2);
-           ASM_VOLATILE_CASE (15, 2);
-           ASM_VOLATILE_CASE (16, 2);
-           ASM_VOLATILE_CASE (17, 2);
-           ASM_VOLATILE_CASE (18, 2);
-           ASM_VOLATILE_CASE (19, 2);
-           ASM_VOLATILE_CASE (20, 2);
-           ASM_VOLATILE_CASE (21, 2);
-           ASM_VOLATILE_CASE (22, 2);
-           ASM_VOLATILE_CASE (23, 2);
-           ASM_VOLATILE_CASE (24, 2);
-           ASM_VOLATILE_CASE (25, 2);
-           ASM_VOLATILE_CASE (26, 2);
-           ASM_VOLATILE_CASE (27, 2);
-           ASM_VOLATILE_CASE (28, 2);
-           ASM_VOLATILE_CASE (29, 2);
-           ASM_VOLATILE_CASE (30, 2);
-           ASM_VOLATILE_CASE (31, 2);
-         default:
-           break;
-         }
-         break;
-     case 3:
-        /* __asm__("dmfc0 %0, $1, 0" :"=r" (x)); */
-        switch (rd) {
-           ASM_VOLATILE_CASE (0, 3);
-           ASM_VOLATILE_CASE (1, 3);
-           ASM_VOLATILE_CASE (2, 3);
-           ASM_VOLATILE_CASE (3, 3);
-           ASM_VOLATILE_CASE (4, 3);
-           ASM_VOLATILE_CASE (5, 3);
-           ASM_VOLATILE_CASE (6, 3);
-           ASM_VOLATILE_CASE (7, 3);
-           ASM_VOLATILE_CASE (8, 3);
-           ASM_VOLATILE_CASE (9, 3);
-           ASM_VOLATILE_CASE (10, 3);
-           ASM_VOLATILE_CASE (11, 3);
-           ASM_VOLATILE_CASE (12, 3);
-           ASM_VOLATILE_CASE (13, 3);
-           ASM_VOLATILE_CASE (14, 3);
-           ASM_VOLATILE_CASE (15, 3);
-           ASM_VOLATILE_CASE (16, 3);
-           ASM_VOLATILE_CASE (17, 3);
-           ASM_VOLATILE_CASE (18, 3);
-           ASM_VOLATILE_CASE (19, 3);
-           ASM_VOLATILE_CASE (20, 3);
-           ASM_VOLATILE_CASE (21, 3);
-           ASM_VOLATILE_CASE (22, 3);
-           ASM_VOLATILE_CASE (23, 3);
-           ASM_VOLATILE_CASE (24, 3);
-           ASM_VOLATILE_CASE (25, 3);
-           ASM_VOLATILE_CASE (26, 3);
-           ASM_VOLATILE_CASE (27, 3);
-           ASM_VOLATILE_CASE (28, 3);
-           ASM_VOLATILE_CASE (29, 3);
-           ASM_VOLATILE_CASE (30, 3);
-           ASM_VOLATILE_CASE (31, 3);
-        default:
-           break;
-        }
-        break;
-     case 4:
-        /* __asm__("dmfc0 %0, $1, 0" :"=r" (x)); */
-        switch (rd) {
-           ASM_VOLATILE_CASE (0, 4);
-           ASM_VOLATILE_CASE (1, 4);
-           ASM_VOLATILE_CASE (2, 4);
-           ASM_VOLATILE_CASE (3, 4);
-           ASM_VOLATILE_CASE (4, 4);
-           ASM_VOLATILE_CASE (5, 4);
-           ASM_VOLATILE_CASE (6, 4);
-           ASM_VOLATILE_CASE (7, 4);
-           ASM_VOLATILE_CASE (8, 4);
-           ASM_VOLATILE_CASE (9, 4);
-           ASM_VOLATILE_CASE (10, 4);
-           ASM_VOLATILE_CASE (11, 4);
-           ASM_VOLATILE_CASE (12, 4);
-           ASM_VOLATILE_CASE (13, 4);
-           ASM_VOLATILE_CASE (14, 4);
-           ASM_VOLATILE_CASE (15, 4);
-           ASM_VOLATILE_CASE (16, 4);
-           ASM_VOLATILE_CASE (17, 4);
-           ASM_VOLATILE_CASE (18, 4);
-           ASM_VOLATILE_CASE (19, 4);
-           ASM_VOLATILE_CASE (20, 4);
-           ASM_VOLATILE_CASE (21, 4);
-           ASM_VOLATILE_CASE (22, 4);
-           ASM_VOLATILE_CASE (23, 4);
-           ASM_VOLATILE_CASE (24, 4);
-           ASM_VOLATILE_CASE (25, 4);
-           ASM_VOLATILE_CASE (26, 4);
-           ASM_VOLATILE_CASE (27, 4);
-           ASM_VOLATILE_CASE (28, 4);
-           ASM_VOLATILE_CASE (29, 4);
-           ASM_VOLATILE_CASE (30, 4);
-           ASM_VOLATILE_CASE (31, 4);
-           default:
-              break;
-           }
-        break;
-     case 5:
-        /* __asm__("dmfc0 %0, $1, 0" :"=r" (x)); */
-        switch (rd) {
-           ASM_VOLATILE_CASE (0, 5);
-           ASM_VOLATILE_CASE (1, 5);
-           ASM_VOLATILE_CASE (2, 5);
-           ASM_VOLATILE_CASE (3, 5);
-           ASM_VOLATILE_CASE (4, 5);
-           ASM_VOLATILE_CASE (5, 5);
-           ASM_VOLATILE_CASE (6, 5);
-           ASM_VOLATILE_CASE (7, 5);
-           ASM_VOLATILE_CASE (8, 5);
-           ASM_VOLATILE_CASE (9, 5);
-           ASM_VOLATILE_CASE (10, 5);
-           ASM_VOLATILE_CASE (11, 5);
-           ASM_VOLATILE_CASE (12, 5);
-           ASM_VOLATILE_CASE (13, 5);
-           ASM_VOLATILE_CASE (14, 5);
-           ASM_VOLATILE_CASE (15, 5);
-           ASM_VOLATILE_CASE (16, 5);
-           ASM_VOLATILE_CASE (17, 5);
-           ASM_VOLATILE_CASE (18, 5);
-           ASM_VOLATILE_CASE (19, 5);
-           ASM_VOLATILE_CASE (20, 5);
-           ASM_VOLATILE_CASE (21, 5);
-           ASM_VOLATILE_CASE (22, 5);
-           ASM_VOLATILE_CASE (23, 5);
-           ASM_VOLATILE_CASE (24, 5);
-           ASM_VOLATILE_CASE (25, 5);
-           ASM_VOLATILE_CASE (26, 5);
-           ASM_VOLATILE_CASE (27, 5);
-           ASM_VOLATILE_CASE (28, 5);
-           ASM_VOLATILE_CASE (29, 5);
-           ASM_VOLATILE_CASE (30, 5);
-           ASM_VOLATILE_CASE (31, 5);
-           default:
-              break;
-        }
-        break;
-     case 6:
-        /* __asm__("dmfc0 %0, $1, 0" :"=r" (x)); */
-        switch (rd) {
-           ASM_VOLATILE_CASE (0, 6);
-           ASM_VOLATILE_CASE (1, 6);
-           ASM_VOLATILE_CASE (2, 6);
-           ASM_VOLATILE_CASE (3, 6);
-           ASM_VOLATILE_CASE (4, 6);
-           ASM_VOLATILE_CASE (5, 6);
-           ASM_VOLATILE_CASE (6, 6);
-           ASM_VOLATILE_CASE (7, 6);
-           ASM_VOLATILE_CASE (8, 6);
-           ASM_VOLATILE_CASE (9, 6);
-           ASM_VOLATILE_CASE (10, 6);
-           ASM_VOLATILE_CASE (11, 6);
-           ASM_VOLATILE_CASE (12, 6);
-           ASM_VOLATILE_CASE (13, 6);
-           ASM_VOLATILE_CASE (14, 6);
-           ASM_VOLATILE_CASE (15, 6);
-           ASM_VOLATILE_CASE (16, 6);
-           ASM_VOLATILE_CASE (17, 6);
-           ASM_VOLATILE_CASE (18, 6);
-           ASM_VOLATILE_CASE (19, 6);
-           ASM_VOLATILE_CASE (20, 6);
-           ASM_VOLATILE_CASE (21, 6);
-           ASM_VOLATILE_CASE (22, 6);
-           ASM_VOLATILE_CASE (23, 6);
-           ASM_VOLATILE_CASE (24, 6);
-           ASM_VOLATILE_CASE (25, 6);
-           ASM_VOLATILE_CASE (26, 6);
-           ASM_VOLATILE_CASE (27, 6);
-           ASM_VOLATILE_CASE (28, 6);
-           ASM_VOLATILE_CASE (29, 6);
-           ASM_VOLATILE_CASE (30, 6);
-           ASM_VOLATILE_CASE (31, 6);
-        default:
-           break;
-        }
-        break;
-     case 7:
-        /* __asm__("dmfc0 %0, $1, 0" :"=r" (x)); */
-        switch (rd) {
-           ASM_VOLATILE_CASE (0, 7);
-           ASM_VOLATILE_CASE (1, 7);
-           ASM_VOLATILE_CASE (2, 7);
-           ASM_VOLATILE_CASE (3, 7);
-           ASM_VOLATILE_CASE (4, 7);
-           ASM_VOLATILE_CASE (5, 7);
-           ASM_VOLATILE_CASE (6, 7);
-           ASM_VOLATILE_CASE (7, 7);
-           ASM_VOLATILE_CASE (8, 7);
-           ASM_VOLATILE_CASE (9, 7);
-           ASM_VOLATILE_CASE (10, 7);
-           ASM_VOLATILE_CASE (11, 7);
-           ASM_VOLATILE_CASE (12, 7);
-           ASM_VOLATILE_CASE (13, 7);
-           ASM_VOLATILE_CASE (14, 7);
-           ASM_VOLATILE_CASE (15, 7);
-           ASM_VOLATILE_CASE (16, 7);
-           ASM_VOLATILE_CASE (17, 7);
-           ASM_VOLATILE_CASE (18, 7);
-           ASM_VOLATILE_CASE (19, 7);
-           ASM_VOLATILE_CASE (20, 7);
-           ASM_VOLATILE_CASE (21, 7);
-           ASM_VOLATILE_CASE (22, 7);
-           ASM_VOLATILE_CASE (23, 7);
-           ASM_VOLATILE_CASE (24, 7);
-           ASM_VOLATILE_CASE (25, 7);
-           ASM_VOLATILE_CASE (26, 7);
-           ASM_VOLATILE_CASE (27, 7);
-           ASM_VOLATILE_CASE (28, 7);
-           ASM_VOLATILE_CASE (29, 7);
-           ASM_VOLATILE_CASE (30, 7);
-           ASM_VOLATILE_CASE (31, 7);
-         default:
-           break;
-         }
-       break;
-
-     default:
-       break;
-     }
-#endif
-   return x;
-}
-
-#if defined(__mips__) && ((defined(__mips_isa_rev) && __mips_isa_rev >= 2))
-UInt mips32_dirtyhelper_rdhwr ( UInt rt, UInt rd )
-{
-   UInt x = 0;
    switch (rd) {
-      case 1:  /* x = SYNCI_StepSize() */
-         __asm__ __volatile__("rdhwr %0, $1\n\t" : "=r" (x) );
+      case 0:  /* x = CPUNum() */
+         ASM_VOLATILE_RDHWR(0); /* rdhwr v0, $0 */
+         break;
+
+      case 1:  /* x = SYNCI_Step() */
+         ASM_VOLATILE_RDHWR(1); /* rdhwr v0, $1 */
+         break;
+
+      case 2:  /* x = CC() */
+         ASM_VOLATILE_RDHWR(2); /* rdhwr v0, $2 */
+         break;
+
+      case 3:  /* x = CCRes() */
+         ASM_VOLATILE_RDHWR(3); /* rdhwr v0, $3 */
          break;
 
       case 31:  /* x = CVMX_get_cycles() */
-         __asm__ __volatile__("rdhwr %0, $31\n\t" : "=r" (x) );
+         ASM_VOLATILE_RDHWR(31); /* rdhwr v0, $31 */
          break;
 
       default:
@@ -1094,102 +460,100 @@ UInt mips32_dirtyhelper_rdhwr ( UInt rt, UInt rd )
          break;
    }
    return x;
-}
-
-ULong mips64_dirtyhelper_rdhwr ( ULong rt, ULong rd )
-{
-   ULong x = 0;
-   switch (rd) {
-      case 1:  /* x = SYNCI_StepSize() */
-         __asm__ __volatile__("rdhwr %0, $1\n\t" : "=r" (x) );
-         break;
-
-      case 31:  /* x = CVMX_get_cycles() */
-         __asm__ __volatile__("rdhwr %0, $31\n\t" : "=r" (x) );
-         break;
-
-      default:
-         vassert(0);
-         break;
-   }
-   return x;
-}
+#else
+   return 0;
 #endif
+}
 
 #define ASM_VOLATILE_UNARY32(inst)                                  \
-   __asm__ volatile("cfc1  $t0,  $31"   "\n\t"                      \
+   __asm__ volatile(".set  push"        "\n\t"                      \
+                    ".set  hardfloat"   "\n\t"                      \
+                    "cfc1  $t0,  $31"   "\n\t"                      \
                     "ctc1  %2,   $31"   "\n\t"                      \
                     "mtc1  %1,   $f20"  "\n\t"                      \
                     #inst" $f20, $f20"  "\n\t"                      \
                     "cfc1  %0,   $31"   "\n\t"                      \
                     "ctc1  $t0,  $31"   "\n\t"                      \
+                    ".set  pop"         "\n\t"                      \
                     : "=r" (ret)                                    \
                     : "r" (loFsVal), "r" (fcsr)                     \
                     : "t0", "$f20"                                  \
                    );
 
 #define ASM_VOLATILE_UNARY32_DOUBLE(inst)                           \
-   __asm__ volatile("cfc1  $t0,  $31"   "\n\t"                      \
-                    "ctc1  %3,   $31"   "\n\t"                      \
-                    "mtc1  %1,   $f20"  "\n\t"                      \
-                    "mtc1  %2,   $f21"  "\n\t"                      \
+   __asm__ volatile(".set  push"        "\n\t"                      \
+                    ".set  hardfloat"   "\n\t"                      \
+                    "cfc1  $t0,  $31"   "\n\t"                      \
+                    "ctc1  %2,   $31"   "\n\t"                      \
+                    "ldc1  $f20, 0(%1)" "\n\t"                      \
                     #inst" $f20, $f20"  "\n\t"                      \
                     "cfc1  %0,   $31"   "\n\t"                      \
                     "ctc1  $t0,  $31"   "\n\t"                      \
+                    ".set  pop"         "\n\t"                      \
                     : "=r" (ret)                                    \
-                    : "r" (loFsVal), "r" (hiFsVal), "r" (fcsr)      \
+                    : "r" (&fsVal), "r" (fcsr)                      \
                     : "t0", "$f20", "$f21"                          \
                    );
 
 #define ASM_VOLATILE_UNARY64(inst)                                  \
-   __asm__ volatile("cfc1  $t0,  $31"    "\n\t"                     \
+   __asm__ volatile(".set  push"         "\n\t"                     \
+                    ".set  hardfloat"    "\n\t"                     \
+                    ".set  fp=64"        "\n\t"                     \
+                    "cfc1  $t0,  $31"    "\n\t"                     \
                     "ctc1  %2,   $31"    "\n\t"                     \
                     "ldc1  $f24, 0(%1)"  "\n\t"                     \
                     #inst" $f24, $f24"   "\n\t"                     \
                     "cfc1  %0,   $31"    "\n\t"                     \
                     "ctc1  $t0,  $31"    "\n\t"                     \
+                    ".set  pop"          "\n\t"                     \
                     : "=r" (ret)                                    \
                     : "r" (&(addr[fs])), "r" (fcsr)                 \
                     : "t0", "$f24"                                  \
                    );
 
 #define ASM_VOLATILE_BINARY32(inst)                                 \
-   __asm__ volatile("cfc1  $t0,  $31"         "\n\t"                \
+   __asm__ volatile(".set  push"              "\n\t"                \
+                    ".set  hardfloat"         "\n\t"                \
+                    "cfc1  $t0,  $31"         "\n\t"                \
                     "ctc1  %3,   $31"         "\n\t"                \
                     "mtc1  %1,   $f20"        "\n\t"                \
                     "mtc1  %2,   $f22"        "\n\t"                \
                     #inst" $f20, $f20, $f22"  "\n\t"                \
                     "cfc1  %0,   $31"         "\n\t"                \
                     "ctc1  $t0,  $31"         "\n\t"                \
+                    ".set  pop"               "\n\t"                \
                     : "=r" (ret)                                    \
                     : "r" (loFsVal), "r" (loFtVal), "r" (fcsr)      \
                     : "t0", "$f20", "$f22"                          \
                    );
 
 #define ASM_VOLATILE_BINARY32_DOUBLE(inst)                          \
-   __asm__ volatile("cfc1  $t0,  $31"         "\n\t"                \
-                    "ctc1  %5,   $31"         "\n\t"                \
-                    "mtc1  %1,   $f20"        "\n\t"                \
-                    "mtc1  %2,   $f21"        "\n\t"                \
-                    "mtc1  %3,   $f22"        "\n\t"                \
-                    "mtc1  %4,   $f23"        "\n\t"                \
+   __asm__ volatile(".set  push"              "\n\t"                \
+                    ".set  hardfloat"         "\n\t"                \
+                    "cfc1  $t0,  $31"         "\n\t"                \
+                    "ctc1  %3,   $31"         "\n\t"                \
+                    "ldc1  $f20, 0(%1)"       "\n\t"                \
+                    "ldc1  $f22, 0(%2)"       "\n\t"                \
                     #inst" $f20, $f20, $f22"  "\n\t"                \
                     "cfc1  %0,   $31"         "\n\t"                \
                     "ctc1  $t0,  $31"         "\n\t"                \
+                    ".set  pop"               "\n\t"                \
                     : "=r" (ret)                                    \
-                    : "r" (loFsVal), "r" (hiFsVal), "r" (loFtVal),  \
-                      "r" (hiFtVal), "r" (fcsr)                     \
+                    : "r" (&fsVal), "r" (&ftVal), "r" (fcsr)        \
                     : "t0", "$f20", "$f21", "$f22", "$f23"          \
                    );
 
 #define ASM_VOLATILE_BINARY64(inst)                                     \
-   __asm__ volatile("cfc1  $t0,  $31"         "\n\t"                    \
+   __asm__ volatile(".set  push"              "\n\t"                    \
+                    ".set  hardfloat"         "\n\t"                    \
+                    "cfc1  $t0,  $31"         "\n\t"                    \
                     "ctc1  %3,   $31"         "\n\t"                    \
                     "ldc1  $f24, 0(%1)"       "\n\t"                    \
                     "ldc1  $f26, 0(%2)"       "\n\t"                    \
                     #inst" $f24, $f24, $f26"  "\n\t"                    \
                     "cfc1  %0,   $31"         "\n\t"                    \
                     "ctc1  $t0,  $31"         "\n\t"                    \
+                    ".set  pop"               "\n\t"                    \
                     : "=r" (ret)                                        \
                     : "r" (&(addr[fs])), "r" (&(addr[ft])), "r" (fcsr)  \
                     : "t0", "$f24", "$f26"                              \
@@ -1217,6 +581,8 @@ extern UInt mips_dirtyhelper_calculate_FCSR_fp32 ( void* gs, UInt fs, UInt ft,
    loFtVal    = (UInt)addr[ft*2];
    hiFtVal    = (UInt)addr[ft*2+2];
 #endif
+   ULong fsVal   = ((ULong) hiFsVal) << 32 | loFsVal;
+   ULong ftVal   = ((ULong) hiFtVal) << 32 | loFtVal;
    UInt fcsr     = guest_state->guest_FCSR;
    switch (inst) {
       case ROUNDWD:
@@ -1261,45 +627,6 @@ extern UInt mips_dirtyhelper_calculate_FCSR_fp32 ( void* gs, UInt fs, UInt ft,
       case ROUNDWS:
          ASM_VOLATILE_UNARY32(round.w.s)
          break;
-#if ((__mips == 32) && defined(__mips_isa_rev) && (__mips_isa_rev >= 2)) \
-    || (__mips == 64)
-      case CEILLS:
-         ASM_VOLATILE_UNARY32(ceil.l.s)
-         break;
-      case CEILLD:
-         ASM_VOLATILE_UNARY32_DOUBLE(ceil.l.d)
-         break;
-      case CVTDL:
-         ASM_VOLATILE_UNARY32_DOUBLE(cvt.d.l)
-         break;
-      case CVTLS:
-         ASM_VOLATILE_UNARY32(cvt.l.s)
-         break;
-      case CVTLD:
-         ASM_VOLATILE_UNARY32_DOUBLE(cvt.l.d)
-         break;
-      case CVTSL:
-         ASM_VOLATILE_UNARY32_DOUBLE(cvt.s.l)
-         break;
-      case FLOORLS:
-         ASM_VOLATILE_UNARY32(floor.l.s)
-         break;
-      case FLOORLD:
-         ASM_VOLATILE_UNARY32_DOUBLE(floor.l.d)
-         break;
-      case ROUNDLS:
-         ASM_VOLATILE_UNARY32(round.l.s)
-         break;
-      case ROUNDLD:
-         ASM_VOLATILE_UNARY32_DOUBLE(round.l.d)
-         break;
-      case TRUNCLS:
-         ASM_VOLATILE_UNARY32(trunc.l.s)
-         break;
-      case TRUNCLD:
-         ASM_VOLATILE_UNARY32_DOUBLE(trunc.l.d)
-         break;
-#endif
       case ADDS:
           ASM_VOLATILE_BINARY32(add.s)
           break;
@@ -1329,7 +656,8 @@ extern UInt mips_dirtyhelper_calculate_FCSR_fp64 ( void* gs, UInt fs, UInt ft,
                                                    flt_op inst )
 {
    UInt ret = 0;
-#if defined(__mips__)
+#if defined(__mips__) && ((__mips == 64) ||                                  \
+                          (defined(__mips_isa_rev) && (__mips_isa_rev >= 2)))
 #if defined(VGA_mips32)
    VexGuestMIPS32State* guest_state = (VexGuestMIPS32State*)gs;
 #else
@@ -1380,8 +708,6 @@ extern UInt mips_dirtyhelper_calculate_FCSR_fp64 ( void* gs, UInt fs, UInt ft,
       case ROUNDWS:
          ASM_VOLATILE_UNARY64(round.w.s)
          break;
-#if ((__mips == 32) && defined(__mips_isa_rev) && (__mips_isa_rev >= 2)) \
-    || (__mips == 64)
       case CEILLS:
          ASM_VOLATILE_UNARY64(ceil.l.s)
          break;
@@ -1418,7 +744,6 @@ extern UInt mips_dirtyhelper_calculate_FCSR_fp64 ( void* gs, UInt fs, UInt ft,
       case TRUNCLD:
          ASM_VOLATILE_UNARY64(trunc.l.d)
          break;
-#endif
       case ADDS:
           ASM_VOLATILE_BINARY64(add.s)
           break;

@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -38,6 +38,11 @@
    definitions, which are different in places from those that glibc
    defines.  Since we're operating right at the kernel interface, glibc's view
    of the world is entirely irrelevant. */
+
+/* --- Signal set ops (only the ops used by tools) --- */
+extern Int  VG_(sigdelset)   ( vki_sigset_t* set, Int signum );
+/* Other Signal set ops are in pub_core_libcsignal.h and must be moved
+   here if needed by tools. */
 
 /* --- Mess with the kernel's sig state --- */
 extern Int VG_(sigprocmask) ( Int how, const vki_sigset_t* set,

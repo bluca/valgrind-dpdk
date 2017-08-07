@@ -1,13 +1,13 @@
 '\" t
 .\"     Title: VALGRIND
 .\"    Author: [see the "Author" section]
-.\" Generator: DocBook XSL Stylesheets v1.78.1 <http://docbook.sf.net/>
-.\"      Date: 09/23/2015
-.\"    Manual: Release 3.11.0
-.\"    Source: Release 3.11.0
+.\" Generator: DocBook XSL Stylesheets v1.79.1 <http://docbook.sf.net/>
+.\"      Date: 06/15/2017
+.\"    Manual: Release 3.13.0
+.\"    Source: Release 3.13.0
 .\"  Language: English
 .\"
-.TH "VALGRIND" "1" "09/23/2015" "Release 3.11.0" "Release 3.11.0"
+.TH "VALGRIND" "1" "06/15/2017" "Release 3.13.0" "Release 3.13.0"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -172,7 +172,9 @@ a comma separated list of one or more of
 \fBstartup exit valgrindabexit\fR\&.
 .sp
 The values
-\fBstartup\fR\fBexit\fR\fBvalgrindabexit\fR
+\fBstartup\fR
+\fBexit\fR
+\fBvalgrindabexit\fR
 respectively indicate to invoke gdbserver before your program is executed, after the last instruction of your program, on Valgrind abnormal exit (e\&.g\&. internal error, out of memory, \&.\&.\&.)\&.
 .sp
 Note:
@@ -235,7 +237,12 @@ is replaced with the current process ID\&. This is very useful for program that 
 \fB\-\-trace\-children=yes\fR
 and your program invokes multiple processes OR your program forks without calling exec afterwards, and you don\*(Aqt use this specifier (or the
 \fB%q\fR
-specifier below), the Valgrind output from all those processes will go into one file, possibly jumbled up, and possibly incomplete\&.
+specifier below), the Valgrind output from all those processes will go into one file, possibly jumbled up, and possibly incomplete\&. Note: If the program forks and calls exec afterwards, Valgrind output of the child from the period between fork and exec will be lost\&. Fortunately this gap is really tiny for most programs; and modern programs use
+posix_spawn
+anyway\&.
+.sp
+\fB%n\fR
+is replaced with a file sequence number unique for this process\&. This is useful for processes that produces several files from the same filename template\&.
 .sp
 \fB%q{FOO}\fR
 is replaced with the contents of the environment variable
@@ -257,7 +264,7 @@ If an
 \fB%\fR
 is followed by any other character, it causes an abort\&.
 .sp
-If the file name specifies a relative file name, it is put in the program\*(Aqs initial working directory : this is the current directory when the program started its execution after the fork or after the exec\&. If it specifies an absolute file name (ie\&. starts with \*(Aq/\*(Aq) then it is put there\&.
+If the file name specifies a relative file name, it is put in the program\*(Aqs initial working directory: this is the current directory when the program started its execution after the fork or after the exec\&. If it specifies an absolute file name (ie\&. starts with \*(Aq/\*(Aq) then it is put there\&.
 .RE
 .PP
 \fB\-\-log\-socket=<ip\-address:port\-number> \fR
@@ -268,7 +275,7 @@ program\&. For further details, see
 the commentary
 in the manual\&.
 .RE
-.SH "ERROR-RELATED OPTIONS"
+.SH "ERROR\-RELATED OPTIONS"
 .PP
 These options are used by all tools that can report errors, e\&.g\&. Memcheck, but not Cachegrind\&.
 .PP
@@ -318,7 +325,7 @@ or
 \fB%q\fR
 sequences appearing in the filename are expanded in exactly the same way as they are for
 \fB\-\-log\-file\fR\&. See the description of
-\fB\-\-log\-file\fR
+--log-file
 for details\&.
 .RE
 .PP
@@ -671,7 +678,7 @@ As discussed further in the description of
 By default, Valgrind can handle to up to 500 threads\&. Occasionally, that number is too small\&. Use this option to provide a different limit\&. E\&.g\&.
 \-\-max\-threads=3000\&.
 .RE
-.SH "MALLOC()-RELATED OPTIONS"
+.SH "MALLOC()\-RELATED OPTIONS"
 .PP
 For tools that use their own version of
 malloc
@@ -691,6 +698,56 @@ Valgrind\*(Aqs
 etc, add padding blocks before and after each heap block allocated by the program being run\&. Such padding blocks are called redzones\&. The default value for the redzone size depends on the tool\&. For example, Memcheck adds and protects a minimum of 16 bytes before and after each block allocated by the client\&. This allows it to detect block underruns or overruns of up to 16 bytes\&.
 .sp
 Increasing the redzone size makes it possible to detect overruns of larger distances, but increases the amount of memory used by Valgrind\&. Decreasing the redzone size will reduce the memory needed by Valgrind but also reduces the chances of detecting over/underruns, so is not recommended\&.
+.RE
+.PP
+\fB\-\-xtree\-memory=none|allocs|full [none] \fR
+.RS 4
+Tools replacing Valgrind\*(Aqs
+\fBmalloc, realloc,\fR
+etc, can optionally produce an execution tree detailing which piece of code is responsible for heap memory usage\&. See
+???
+for a detailed explanation about execution trees\&.
+.sp
+When set to
+\fInone\fR, no memory execution tree is produced\&.
+.sp
+When set to
+\fIallocs\fR, the memory execution tree gives the current number of allocated bytes and the current number of allocated blocks\&.
+.sp
+When set to
+\fIfull\fR, the memory execution tree gives 6 different measurements : the current number of allocated bytes and blocks (same values as for
+\fIallocs\fR), the total number of allocated bytes and blocks, the total number of freed bytes and blocks\&.
+.sp
+Note that the overhead in cpu and memory to produce an xtree depends on the tool\&. The overhead in cpu is small for the value
+\fIallocs\fR, as the information needed to produce this report is maintained in any case by the tool\&. For massif and helgrind, specifying
+\fIfull\fR
+implies to capture a stack trace for each free operation, while normally these tools only capture an allocation stack trace\&. For memcheck, the cpu overhead for the value
+\fIfull\fR
+is small, as this can only be used in combination with
+\fB\-\-keep\-stacktraces=alloc\-and\-free\fR
+or
+\fB\-\-keep\-stacktraces=alloc\-then\-free\fR, which already records a stack trace for each free operation\&. The memory overhead varies between 5 and 10 words per unique stacktrace in the xtree, plus the memory needed to record the stack trace for the free operations, if needed specifically for the xtree\&.
+.RE
+.PP
+\fB\-\-xtree\-memory\-file=<filename> [default: xtmemory\&.kcg\&.%p] \fR
+.RS 4
+Specifies that Valgrind should produce the xtree memory report in the specified file\&. Any
+\fB%p\fR
+or
+\fB%q\fR
+sequences appearing in the filename are expanded in exactly the same way as they are for
+\fB\-\-log\-file\fR\&. See the description of
+--log-file
+for details\&.
+.sp
+If the filename contains the extension
+\fB\&.ms\fR, then the produced file format will be a massif output file format\&. If the filename contains the extension
+\fB\&.kcg\fR
+or no extension is provided or recognised, then the produced file format will be a callgrind output format\&.
+.sp
+See
+???
+for a detailed explanation about execution trees formats\&.
 .RE
 .SH "UNCOMMON OPTIONS"
 .PP
@@ -861,6 +918,25 @@ fixes that, although at the cost of possibly falsely reporting space leaks in
 libc\&.so\&.
 .RE
 .PP
+\fB\-\-run\-cxx\-freeres=<yes|no> [default: yes] \fR
+.RS 4
+This option is only relevant when running Valgrind on Linux or Solaris C++ programs\&.
+.sp
+The GNU Standard C++ library (\fBlibstdc++\&.so\fR), which is used by all C++ programs compiled with g++, may allocate memory for its own uses\&. Usually it doesn\*(Aqt bother to free that memory when the program ends\(emthere would be no point, since the kernel reclaims all process resources when a process exits anyway, so it would just slow things down\&.
+.sp
+The gcc authors realised that this behaviour causes leak checkers, such as Valgrind, to falsely report leaks in libstdc++, when a leak check is done at exit\&. In order to avoid this, they provided a routine called
+\fB__gnu_cxx::__freeres\fR
+specifically to make libstdc++ release all memory it has allocated\&. Memcheck therefore tries to run
+\fB__gnu_cxx::__freeres\fR
+at exit\&.
+.sp
+For the sake of flexibility and unforeseen problems with
+\fB__gnu_cxx::__freeres\fR, option
+\fB\-\-run\-cxx\-freeres=no\fR
+exists, although at the cost of possibly falsely reporting space leaks in
+libstdc++\&.so\&.
+.RE
+.PP
 \fB\-\-sim\-hints=hint1,hint2,\&.\&.\&. \fR
 .RS 4
 Pass miscellaneous hints to Valgrind which slightly modify the simulated behaviour in nonstandard or dangerous ways, possibly to help the simulation of strange features\&. By default no hints are enabled\&. Use with caution! Currently known hints are:
@@ -936,7 +1012,7 @@ qualifier)\&.
 .sp
 When using the memcheck tool, disabling the cache ensures the memory used by glibc to handle __thread variables is directly released when a thread terminates\&.
 .sp
-Note: Valgrind disables the cache using some internal knowledge of the glibc stack cache implementation and by examining the debug information of the pthread library\&. This technique is thus somewhat fragile and might not work for all glibc versions\&. This has been succesfully tested with various glibc versions (e\&.g\&. 2\&.11, 2\&.16, 2\&.18) on various platforms\&.
+Note: Valgrind disables the cache using some internal knowledge of the glibc stack cache implementation and by examining the debug information of the pthread library\&. This technique is thus somewhat fragile and might not work for all glibc versions\&. This has been successfully tested with various glibc versions (e\&.g\&. 2\&.11, 2\&.16, 2\&.18) on various platforms\&.
 .RE
 .sp
 .RS 4
@@ -949,6 +1025,17 @@ Note: Valgrind disables the cache using some internal knowledge of the glibc sta
 .\}
 \fBlax\-doors: \fR
 (Solaris only) Be very lax about door syscall handling over unrecognised door file descriptors\&. Does not require that full buffer is initialised when writing\&. Without this, programs using libdoor(3LIB) functionality with completely proprietary semantics may report large number of false positives\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBfallback\-llsc: \fR(MIPS and ARM64 only): Enables an alternative implementation of Load\-Linked (LL) and Store\-Conditional (SC) instructions\&. The standard implementation gives more correct behaviour, but can cause indefinite looping on certain processor implementations that are intolerant of extra memory references between LL and SC\&. So far this is known only to happen on Cavium 3 cores\&. You should not need to use this flag, since the relevant cores are detected at startup and the alternative implementation is automatically enabled if necessary\&. There is no equivalent anti\-flag: you cannot force\-disable the alternative implementation, if it is automatically enabled\&. The underlying problem exists because the "standard" implementation of LL and SC is done by copying through LL and SC instructions into the instrumented code\&. However, tools may insert extra instrumentation memory references in between the LL and SC instructions\&. These memory references are not present in the original uninstrumented code, and their presence in the instrumented code can cause the SC instructions to persistently fail, leading to indefinite looping in LL\-SC blocks\&. The alternative implementation gives correct behaviour of LL and SC instructions between threads in a process, up to and including the ABA scenario\&. It also gives correct behaviour between a Valgrinded thread and a non\-Valgrinded thread running in a different process, that communicate via shared memory, but only up to and including correct CAS behaviour \-\- in this case the ABA scenario may not be correctly handled\&.
 .RE
 .RE
 .PP
@@ -1156,11 +1243,11 @@ wildcards\&.
 .PP
 \fB\-\-soname\-synonyms=syn1=pattern1,syn2=pattern2,\&.\&.\&.\fR
 .RS 4
-When a shared library is loaded, Valgrind checks for functions in the library that must be replaced or wrapped\&. For example, Memcheck replaces all malloc related functions (malloc, free, calloc, \&.\&.\&.) with its own versions\&. Such replacements are done by default only in shared libraries whose soname matches a predefined soname pattern (e\&.g\&.
+When a shared library is loaded, Valgrind checks for functions in the library that must be replaced or wrapped\&. For example, Memcheck replaces some string and memory functions (strchr, strlen, strcpy, memchr, memcpy, memmove, etc\&.) with its own versions\&. Such replacements are normally done only in shared libraries whose soname matches a predefined soname pattern (e\&.g\&.
 \fIlibc\&.so*\fR
-on linux)\&. By default, no replacement is done for a statically linked library or for alternative libraries such as tcmalloc\&. In some cases, the replacements allow
+on linux)\&. By default, no replacement is done for a statically linked binary or for alternative libraries, except for the allocation functions (malloc, free, calloc, memalign, realloc, operator new, operator delete, etc\&.) Such allocation functions are intercepted by default in any shared library or in the executable if they are exported as global symbols\&. This means that if a replacement allocation library such as tcmalloc is found, its functions are also intercepted by default\&. In some cases, the replacements allow
 \fB\-\-soname\-synonyms\fR
-to specify one additional synonym pattern, giving flexibility in the replacement\&.
+to specify one additional synonym pattern, giving flexibility in the replacement\&. Or to prevent interception of all public allocation symbols\&.
 .sp
 Currently, this flexibility is only allowed for the malloc related functions, using the synonym
 \fIsomalloc\fR\&. This synonym is usable for all tools doing standard replacement of malloc related functions (e\&.g\&. memcheck, massif, drd, helgrind, exp\-dhat, exp\-sgcheck)\&.
@@ -1173,8 +1260,9 @@ Currently, this flexibility is only allowed for the malloc related functions, us
 .sp -1
 .IP \(bu 2.3
 .\}
-Alternate malloc library: to replace the malloc related functions in an alternate library with soname
-\fImymalloclib\&.so\fR, give the option
+Alternate malloc library: to replace the malloc related functions in a specific alternate library with soname
+\fImymalloclib\&.so\fR
+(and not in any others), give the option
 \fB\-\-soname\-synonyms=somalloc=mymalloclib\&.so\fR\&. A pattern can be used to match multiple libraries sonames\&. For example,
 \fB\-\-soname\-synonyms=somalloc=*tcmalloc*\fR
 will match the soname of all variants of the tcmalloc library (native, debug, profiled, \&.\&.\&. tcmalloc variants)\&.
@@ -1193,7 +1281,7 @@ Note: the soname of a elf shared library can be retrieved using the readelf util
 Replacements in a statically linked library are done by using the
 \fINONE\fR
 pattern\&. For example, if you link with
-\fIlibtcmalloc\&.a\fR, memcheck will properly work when you give the option
+\fIlibtcmalloc\&.a\fR, and only want to intercept the malloc related functions in the executable (and standard libraries) themselves, but not any other shared libraries, you can give the option
 \fB\-\-soname\-synonyms=somalloc=NONE\fR\&. Note that a NONE pattern will match the main executable and any shared library having no soname\&.
 .RE
 .sp
@@ -1207,6 +1295,34 @@ pattern\&. For example, if you link with
 .\}
 To run a "default" Firefox build for Linux, in which JEMalloc is linked in to the main executable, use
 \fB\-\-soname\-synonyms=somalloc=NONE\fR\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+To only intercept allocation symbols in the default system libraries, but not in any other shared library or the executable defining public malloc or operator new related functions use a non\-existing library name like
+\fB\-\-soname\-synonyms=somalloc=nouserintercepts\fR
+(where
+\fInouserintercepts\fR
+can be any non\-existing library name)\&.
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+Shared library of the dynamic (runtime) linker is excluded from searching for global public symbols, such as those for the malloc related functions (identified by
+\fIsomalloc\fR
+synonym)\&.
 .RE
 .RE
 .SH "DEBUGGING VALGRIND OPTIONS"
@@ -1394,6 +1510,151 @@ has no effect if
 is specified\&.
 .RE
 .PP
+\fB\-\-xtree\-leak=<no|yes> [no] \fR
+.RS 4
+If set to yes, the results for the leak search done at exit will be output in a \*(AqCallgrind Format\*(Aq execution tree file\&. Note that this automatically sets the option
+\fB\-\-leak\-check=full\fR\&. The produced file will contain the following events:
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBRB\fR
+: Reachable Bytes
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBPB\fR
+: Possibly lost Bytes
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBIB\fR
+: Indirectly lost Bytes
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBDB\fR
+: Definitely lost Bytes (direct plus indirect)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBDIB\fR
+: Definitely Indirectly lost Bytes (subset of DB)
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBRBk\fR
+: reachable Blocks
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBPBk\fR
+: Possibly lost Blocks
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBIBk\fR
+: Indirectly lost Blocks
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+\fBDBk\fR
+: Definitely lost Blocks
+.RE
+.sp
+The increase or decrease for all events above will also be output in the file to provide the delta (increase or decreaseà between 2 successive leak searches\&. For example,
+\fBiRB\fR
+is the increase of the
+\fBRB\fR
+event,
+\fBdPBk\fR
+is the decrease of
+\fBPBk\fR
+event\&. The values for the increase and decrease events will be zero for the first leak search done\&.
+.sp
+See
+???
+for a detailed explanation about execution trees\&.
+.RE
+.PP
+\fB\-\-xtree\-leak\-file=<filename> [default: xtleak\&.kcg\&.%p] \fR
+.RS 4
+Specifies that Valgrind should produce the xtree leak report in the specified file\&. Any
+\fB%p\fR,
+\fB%q\fR
+or
+\fB%n\fR
+sequences appearing in the filename are expanded in exactly the same way as they are for
+\fB\-\-log\-file\fR\&. See the description of
+--log-file
+for details\&.
+.sp
+See
+???
+for a detailed explanation about execution trees formats\&.
+.RE
+.PP
 \fB\-\-undef\-value\-errors=<yes|no> [default: yes] \fR
 .RS 4
 Controls whether Memcheck reports uses of undefined value errors\&. Set this to
@@ -1462,6 +1723,15 @@ Note that once a stack trace is recorded, Valgrind keeps the stack trace in memo
 \fI\-\-keep\-stacktraces\fR
 and/or by using a smaller value for the option
 \fI\-\-num\-callers\fR\&.
+.sp
+If you want to use
+\-\-xtree\-memory=full
+memory profiling (see
+???
+), then you cannot specify
+\fI\-\-keep\-stacktraces=free\fR
+or
+\fI\-\-keep\-stacktraces=none\fR\&.
 .RE
 .PP
 \fB\-\-freelist\-vol=<number> [default: 20000000] \fR
@@ -1490,6 +1760,19 @@ Setting a value of 0 means that all the blocks are re\-circulated in a FIFO orde
 When enabled, assume that reads and writes some small distance below the stack pointer are due to bugs in GCC 2\&.96, and does not report them\&. The "small distance" is 256 bytes by default\&. Note that GCC 2\&.96 is the default compiler on some ancient Linux distributions (RedHat 7\&.X) and so you may need to use this option\&. Do not use it if you do not have to, as it can cause real errors to be overlooked\&. A better alternative is to use a more recent GCC in which this bug is fixed\&.
 .sp
 You may also need to use this option when working with GCC 3\&.X or 4\&.X on 32\-bit PowerPC Linux\&. This is because GCC generates code which occasionally accesses below the stack pointer, particularly for floating\-point to/from integer conversions\&. This is in violation of the 32\-bit PowerPC ELF specification, which makes no provision for locations below the stack pointer to be accessible\&.
+.sp
+This option is deprecated as of version 3\&.12 and may be removed from future versions\&. You should instead use
+\fB\-\-ignore\-range\-below\-sp\fR
+to specify the exact range of offsets below the stack pointer that should be ignored\&. A suitable equivalent is
+\fB\-\-ignore\-range\-below\-sp=1024\-1\fR\&.
+.RE
+.PP
+\fB\-\-ignore\-range\-below\-sp=<number>\-<number> \fR
+.RS 4
+This is a more general replacement for the deprecated
+\fB\-\-workaround\-gcc296\-bugs\fR
+option\&. When specified, it causes Memcheck not to report errors for accesses at the specified offsets below the stack pointer\&. The two offsets must be positive decimal numbers and \-\- somewhat counterintuitively \-\- the first one must be larger, in order to imply a non\-wraparound address range to ignore\&. For example, to ignore 4 byte accesses at 8192 bytes below the stack pointer, use
+\fB\-\-ignore\-range\-below\-sp=8192\-8189\fR\&. Only one range may be specified\&.
 .RE
 .PP
 \fB\-\-show\-mismatched\-frees=<yes|no> [default: yes] \fR
@@ -2261,7 +2544,8 @@ cg_annotate(1), callgrind_annotate(1), callgrind_control(1), ms_print(1),
 $INSTALL/share/doc/valgrind/html/index\&.html
 or
 http://www\&.valgrind\&.org/docs/manual/index\&.html,
-\m[blue]\fBDebugging your program using Valgrind\*(Aqs gdbserver and GDB\fR\m[]\&\s-2\u[1]\d\s+2\m[blue]\fBvgdb\fR\m[]\&\s-2\u[2]\d\s+2,
+\m[blue]\fBDebugging your program using Valgrind\*(Aqs gdbserver and GDB\fR\m[]\&\s-2\u[1]\d\s+2
+\m[blue]\fBvgdb\fR\m[]\&\s-2\u[2]\d\s+2,
 \m[blue]\fBValgrind monitor commands\fR\m[]\&\s-2\u[3]\d\s+2,
 \m[blue]\fBThe Commentary\fR\m[]\&\s-2\u[4]\d\s+2,
 \m[blue]\fBScheduling and Multi\-Thread Performance\fR\m[]\&\s-2\u[5]\d\s+2,

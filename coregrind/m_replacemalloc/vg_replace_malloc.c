@@ -8,7 +8,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -101,14 +101,6 @@
    10260 ZONE_UNREGISTER
    10270 ZONE_SET_NAME
    10280 ZONE_GET_NAME
-   10300 RTE_MALLOC
-   10310 RTE_CALLOC
-   10320 RTE_ZMALLOC
-   10330 RTE_REALLOC
-   10340 RTE_MALLOC_SOCKET
-   10350 RTE_CALLOC_SOCKET
-   10360 RTE_ZMALLOC_SOCKET
-   10370 RTE_FREE
 */
 
 /* 2 Apr 05: the Portland Group compiler, which uses cfront/ARM style
@@ -299,7 +291,6 @@ static void init(void);
 // For some lines, we will also define a replacement function
 // whose only purpose is to be a soname synonym place holder
 // that can be replaced using --soname-synonyms.
-#define SO_SYN_MALLOC VG_SO_SYN(somalloc)
 
 // malloc
 #if defined(VGO_linux)
@@ -1154,260 +1145,6 @@ static void panic(const char *str)
 
 #endif
 
-/*---------------------- rte_malloc ----------------------*/
-
-/* Generate a replacement for 'fnname' in object 'soname', which calls
-   'vg_replacement' to allocate memory.  If that fails, return NULL.
-*/
-#define RTE_MALLOC(soname, fnname) \
-   \
-   void* VG_REPLACE_FUNCTION_EZU(10300,soname,fnname) \
-            ( const char *type, SizeT n, unsigned align ); \
-   void* VG_REPLACE_FUNCTION_EZU(10300,soname,fnname) \
-            ( const char *type, SizeT n, unsigned align ) \
-   { \
-      void* v; \
-      \
-      DO_INIT; \
-      TRIGGER_MEMCHECK_ERROR_IF_UNDEFINED(n); \
-      MALLOC_TRACE("rte_malloc(%s,%llu,%u)", type, (ULong)n, align ); \
-      \
-      v = (void*)VALGRIND_NON_SIMD_CALL3( info.tl_rte_malloc, type, n, align ); \
-      MALLOC_TRACE(" = %p\n", v ); \
-      return v; \
-   }
-
-// rte_malloc
-RTE_MALLOC(VG_Z_DPDK_SONAME, rte_malloc);
-RTE_MALLOC(VG_Z_RTE_SONAME,  rte_malloc);
-RTE_MALLOC(VG_Z_RTE_EAL_SONAME,  rte_malloc);
-RTE_MALLOC(SO_SYN_MALLOC,    rte_malloc);
-
-
-/*---------------------- rte_calloc ----------------------*/
-
-#define RTE_CALLOC(soname, fnname) \
-   \
-   void* VG_REPLACE_FUNCTION_EZU(10310,soname,fnname) \
-            ( const char *type, SizeT nmemb, SizeT size, unsigned align ); \
-   void* VG_REPLACE_FUNCTION_EZU(10310,soname,fnname) \
-            ( const char *type, SizeT nmemb, SizeT size, unsigned align )  \
-   { \
-      void* v; \
-      \
-      DO_INIT; \
-      MALLOC_TRACE("rte_calloc(%s,%llu,%llu,%u)", type, (ULong)nmemb, \
-              (ULong)size, align ); \
-      \
-      /* Protect against overflow.  See bug 24078. (that bug number is
-         invalid.  Which one really?) */ \
-      /* But don't use division, since that produces an external symbol
-         reference on ARM, in the form of a call to __aeabi_uidiv.  It's
-         normally OK, because ld.so manages to resolve it to something in the
-         executable, or one of its shared objects.  But that isn't guaranteed
-         to be the case, and it has been observed to fail in rare cases, eg:
-            echo x | valgrind /bin/sed -n "s/.*-\>\ //p"
-         So instead compute the high word of the product and check it is zero. */ \
-      if (umulHW(size, nmemb) != 0) return NULL; \
-      v = (void*)VALGRIND_NON_SIMD_CALL4( info.tl_rte_calloc, type, nmemb, size, \
-              align ); \
-      MALLOC_TRACE(" = %p\n", v ); \
-      return v; \
-   }
-
-RTE_CALLOC(VG_Z_DPDK_SONAME, rte_calloc);
-RTE_CALLOC(VG_Z_RTE_SONAME,  rte_calloc);
-RTE_CALLOC(VG_Z_RTE_EAL_SONAME,  rte_calloc);
-RTE_CALLOC(SO_SYN_MALLOC,    rte_calloc);
-
-
-/*---------------------- rte_zmalloc ----------------------*/
-
-#define RTE_ZMALLOC(soname, fnname) \
-   \
-   void* VG_REPLACE_FUNCTION_EZU(10320,soname,fnname) \
-            ( const char *type, SizeT n, unsigned align ); \
-   void* VG_REPLACE_FUNCTION_EZU(10320,soname,fnname) \
-            ( const char *type, SizeT n, unsigned align ) \
-   { \
-      void* v; \
-      \
-      DO_INIT; \
-      TRIGGER_MEMCHECK_ERROR_IF_UNDEFINED(n); \
-      MALLOC_TRACE("rte_zmalloc(%s,%llu,%u)", type, (ULong)n, align ); \
-      \
-      v = (void*)VALGRIND_NON_SIMD_CALL3( info.tl_rte_zmalloc, type, n, align ); \
-      MALLOC_TRACE(" = %p\n", v ); \
-      return v; \
-   }
-
-// rte_zmalloc
-RTE_ZMALLOC(VG_Z_DPDK_SONAME, rte_zmalloc);
-RTE_ZMALLOC(VG_Z_RTE_SONAME,  rte_zmalloc);
-RTE_ZMALLOC(VG_Z_RTE_EAL_SONAME,  rte_zmalloc);
-RTE_ZMALLOC(SO_SYN_MALLOC,    rte_zmalloc);
-
-/*---------------------- rte_malloc_socket ----------------------*/
-
-/* Generate a replacement for 'fnname' in object 'soname', which calls
-   'vg_replacement' to allocate memory.  If that fails, return NULL.
-*/
-#define RTE_MALLOC_SOCKET(soname, fnname) \
-   \
-   void* VG_REPLACE_FUNCTION_EZU(10340,soname,fnname) \
-            ( const char *type, SizeT n, unsigned align, int socket ); \
-   void* VG_REPLACE_FUNCTION_EZU(10340,soname,fnname) \
-            ( const char *type, SizeT n, unsigned align, int socket ) \
-   { \
-      void* v; \
-      \
-      DO_INIT; \
-      TRIGGER_MEMCHECK_ERROR_IF_UNDEFINED(n); \
-      MALLOC_TRACE("rte_malloc_socket(%s,%llu,%u,%d)", type, (ULong)n, align, \
-              socket ); \
-      \
-      v = (void*)VALGRIND_NON_SIMD_CALL4( info.tl_rte_malloc_socket, type, n, \
-              align, socket ); \
-      MALLOC_TRACE(" = %p\n", v ); \
-      return v; \
-   }
-
-// rte_malloc_socket
-RTE_MALLOC_SOCKET(VG_Z_DPDK_SONAME, rte_malloc_socket);
-RTE_MALLOC_SOCKET(VG_Z_RTE_SONAME,  rte_malloc_socket);
-RTE_MALLOC_SOCKET(VG_Z_RTE_EAL_SONAME,  rte_malloc_socket);
-RTE_MALLOC_SOCKET(SO_SYN_MALLOC,    rte_malloc_socket);
-
-
-/*---------------------- rte_calloc_socket ----------------------*/
-
-#define RTE_CALLOC_SOCKET(soname, fnname) \
-   \
-   void* VG_REPLACE_FUNCTION_EZU(10350,soname,fnname) \
-            ( const char *type, SizeT nmemb, SizeT size, unsigned align, \
-                    int socket ); \
-   void* VG_REPLACE_FUNCTION_EZU(10350,soname,fnname) \
-            ( const char *type, SizeT nmemb, SizeT size, unsigned align, \
-                    int socket )  \
-   { \
-      void* v; \
-      \
-      DO_INIT; \
-      MALLOC_TRACE("rte_calloc_socket(%s,%llu,%llu,%u,%d)", type, (ULong)nmemb, \
-              (ULong)size, align, socket ); \
-      \
-      /* Protect against overflow.  See bug 24078. (that bug number is
-         invalid.  Which one really?) */ \
-      /* But don't use division, since that produces an external symbol
-         reference on ARM, in the form of a call to __aeabi_uidiv.  It's
-         normally OK, because ld.so manages to resolve it to something in the
-         executable, or one of its shared objects.  But that isn't guaranteed
-         to be the case, and it has been observed to fail in rare cases, eg:
-            echo x | valgrind /bin/sed -n "s/.*-\>\ //p"
-         So instead compute the high word of the product and check it is zero. */ \
-      if (umulHW(size, nmemb) != 0) return NULL; \
-      v = (void*)VALGRIND_NON_SIMD_CALL5( info.tl_rte_calloc_socket, type, \
-              nmemb, size, align, socket ); \
-      MALLOC_TRACE(" = %p\n", v ); \
-      return v; \
-   }
-
-RTE_CALLOC_SOCKET(VG_Z_DPDK_SONAME, rte_calloc_socket);
-RTE_CALLOC_SOCKET(VG_Z_RTE_SONAME,  rte_calloc_socket);
-RTE_CALLOC_SOCKET(VG_Z_RTE_EAL_SONAME,  rte_calloc_socket);
-RTE_CALLOC_SOCKET(SO_SYN_MALLOC,    rte_calloc_socket);
-
-
-/*---------------------- rte_zmalloc_socket ----------------------*/
-
-#define RTE_ZMALLOC_SOCKET(soname, fnname) \
-   \
-   void* VG_REPLACE_FUNCTION_EZU(10360,soname,fnname) \
-            ( const char *type, SizeT n, unsigned align, int socket ); \
-   void* VG_REPLACE_FUNCTION_EZU(10360,soname,fnname) \
-            ( const char *type, SizeT n, unsigned align, int socket ) \
-   { \
-      void* v; \
-      \
-      DO_INIT; \
-      TRIGGER_MEMCHECK_ERROR_IF_UNDEFINED(n); \
-      MALLOC_TRACE("rte_zmalloc_socket(%s,%llu,%u,%d)", type, (ULong)n, align, \
-              socket ); \
-      \
-      v = (void*)VALGRIND_NON_SIMD_CALL4( info.tl_rte_zmalloc_socket, type, n, \
-              align, socket ); \
-      MALLOC_TRACE(" = %p\n", v ); \
-      return v; \
-   }
-
-// rte_zmalloc_socket
-RTE_ZMALLOC_SOCKET(VG_Z_DPDK_SONAME, rte_zmalloc_socket);
-RTE_ZMALLOC_SOCKET(VG_Z_RTE_SONAME,  rte_zmalloc_socket);
-RTE_ZMALLOC_SOCKET(VG_Z_RTE_EAL_SONAME,  rte_zmalloc_socket);
-RTE_ZMALLOC_SOCKET(SO_SYN_MALLOC,    rte_zmalloc_socket);
-
-
-/*---------------------- rte_free ----------------------*/
-
-/* Generate a replacement for 'fnname' in object 'soname', which calls
-   'vg_replacement' to free previously allocated memory.
-*/
-
-#define RTE_FREE(soname, fnname) \
-   \
-   void VG_REPLACE_FUNCTION_EZU(10370,soname,fnname) (void *p); \
-   void VG_REPLACE_FUNCTION_EZU(10370,soname,fnname) (void *p)  \
-   { \
-      DO_INIT; \
-      MALLOC_TRACE(#fnname "(%p)\n", p ); \
-      if (p == NULL)  \
-         return; \
-      (void)VALGRIND_NON_SIMD_CALL1( info.tl_rte_free, p ); \
-   }
-
-// rte_free
-RTE_FREE(VG_Z_DPDK_SONAME,  rte_free );
-RTE_FREE(VG_Z_RTE_SONAME,   rte_free);
-RTE_FREE(VG_Z_RTE_EAL_SONAME,  rte_free);
-RTE_FREE(SO_SYN_MALLOC,     rte_free );
-
-
-/*---------------------- rte_realloc ----------------------*/
-
-#define RTE_REALLOC(soname, fnname) \
-   \
-   void* VG_REPLACE_FUNCTION_EZU(10330,soname,fnname) \
-            ( void* ptrV, SizeT new_size, unsigned align );\
-   void* VG_REPLACE_FUNCTION_EZU(10330,soname,fnname) \
-            ( void* ptrV, SizeT new_size, unsigned align ) \
-   { \
-      void* v; \
-      \
-      DO_INIT; \
-      MALLOC_TRACE("realloc(%p,%llu,%u)", ptrV, (ULong)new_size, \
-              align ); \
-      \
-      if (ptrV == NULL) \
-         /* We need to call a malloc-like function; so let's use \
-            one which we know exists. */ \
-         return VG_REPLACE_FUNCTION_EZU(10300,VG_Z_DPDK_SONAME,rte_malloc) \
-                   (NULL, new_size, align); \
-      if (new_size <= 0) { \
-         VG_REPLACE_FUNCTION_EZU(10370,VG_Z_DPDK_SONAME,rte_free)(ptrV); \
-         MALLOC_TRACE(" = 0\n"); \
-         return NULL; \
-      } \
-      v = (void*)VALGRIND_NON_SIMD_CALL3( info.tl_rte_realloc, ptrV, \
-              new_size, align ); \
-      MALLOC_TRACE(" = %p\n", v ); \
-      return v; \
-   }
-
-RTE_REALLOC(VG_Z_DPDK_SONAME, rte_realloc);
-RTE_REALLOC(VG_Z_RTE_SONAME,  rte_realloc);
-RTE_REALLOC(VG_Z_RTE_EAL_SONAME,  rte_realloc);
-RTE_REALLOC(SO_SYN_MALLOC,    rte_realloc);
-
 
 /*------------------ Darwin zone stuff ------------------*/
 
@@ -1443,7 +1180,7 @@ static vki_malloc_zone_t vg_default_zone = {
     NULL, // batch_free
     NULL, // GrP fixme: introspect
     2,  // version (GrP fixme 3?)
-    NULL, /* memalign */   // DDD: this field exists in Mac OS 10.6, but not 10.5.
+    (void*)VG_REPLACE_FUNCTION_EZU(10100,VG_Z_LIBC_SONAME,malloc_zone_memalign), // DDD: this field exists in Mac OS 10.6+
     NULL, /* free_definite_size */
     NULL, /* pressure_relief */
 };
@@ -1538,15 +1275,15 @@ ZONE_SET_NAME(SO_SYN_MALLOC,    malloc_set_zone_name);
 
 #define ZONE_GET_NAME(soname, fnname) \
    \
-   char* VG_REPLACE_FUNCTION_EZU(10280,soname,fnname)(void* zone); \
-   char* VG_REPLACE_FUNCTION_EZU(10280,soname,fnname)(void* zone)  \
+   const char* VG_REPLACE_FUNCTION_EZU(10280,soname,fnname)(void* zone); \
+   const char* VG_REPLACE_FUNCTION_EZU(10280,soname,fnname)(void* zone)  \
    { \
       TRIGGER_MEMCHECK_ERROR_IF_UNDEFINED(zone); \
       return vg_default_zone.zone_name; \
    }
 
-ZONE_SET_NAME(VG_Z_LIBC_SONAME, malloc_get_zone_name);
-ZONE_SET_NAME(SO_SYN_MALLOC,    malloc_get_zone_name);
+ZONE_GET_NAME(VG_Z_LIBC_SONAME, malloc_get_zone_name);
+ZONE_GET_NAME(SO_SYN_MALLOC,    malloc_get_zone_name);
 
 #endif /* defined(VGO_darwin) */
 
@@ -1580,7 +1317,7 @@ static void init(void)
    init_done = 1;
 
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__GET_MALLOCFUNCS, &info,
-                                   0, 0, 0, 0, 0);
+                                   0, 0, 0, 0);
 }
 
 /*--------------------------------------------------------------------*/

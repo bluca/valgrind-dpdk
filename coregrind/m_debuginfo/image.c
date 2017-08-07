@@ -9,7 +9,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2013-2015 Mozilla Foundation
+   Copyright (C) 2013-2017 Mozilla Foundation
 
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License as
@@ -45,6 +45,8 @@
 #include "priv_image.h"            /* self */
 
 #include "minilzo.h"
+#define TINFL_HEADER_FILE_ONLY
+#include "tinfl.c"
 
 /* These values (1024 entries of 8192 bytes each) gives a cache
    size of 8MB. */
@@ -53,14 +55,28 @@
 
 #define CACHE_ENTRY_SIZE      (1 << CACHE_ENTRY_SIZE_BITS)
 
+#define COMPRESSED_SLICE_ARRAY_GROW_SIZE 64
+
 /* An entry in the cache. */
 typedef
    struct {
-      DiOffT off; // file offset for data[0]
-      SizeT  used; // 1 .. sizeof(data), or 0 to denote not-in-use
-      UChar  data[CACHE_ENTRY_SIZE];
+      Bool   fromC;  // True === contains decompressed data
+      DiOffT off;    // file offset for data[0]
+      SizeT  size;   // sizeof(data)
+      SizeT  used;   // 1 .. sizeof(data), or 0 to denote not-in-use
+      UChar  data[];
    }
    CEnt;
+
+/* Compressed slice */
+typedef
+   struct {
+      DiOffT offD;  // offset of decompressed data
+      SizeT  szD;   // size of decompressed data
+      DiOffT offC;  // offset of compressed data
+      SizeT  szC;   // size of compressed data
+   }
+   CSlc;
 
 /* Source for files */
 typedef
@@ -82,8 +98,10 @@ typedef
 struct _DiImage {
    // The source -- how to get hold of the file we are reading
    Source source;
-   // Total size of the image.
+   // Virtual size of the image = real size + size of uncompressed data
    SizeT size;
+   // Real size of image
+   SizeT real_size;
    // The number of entries used.  0 .. CACHE_N_ENTRIES
    UInt  ces_used;
    // Pointers to the entries.  ces[0 .. ces_used-1] are non-NULL.
@@ -91,7 +109,52 @@ struct _DiImage {
    // The non-NULL entries may be arranged arbitrarily.  We expect to use
    // a pseudo-LRU scheme though.
    CEnt* ces[CACHE_N_ENTRIES];
+
+   // Array of compressed slices
+   CSlc* cslc;
+   // Number of compressed slices used
+   UInt  cslc_used;
+   // Size of cslc array
+   UInt  cslc_size;
 };
+
+
+/* Sanity check code for CEnts. */
+static void pp_CEnt(const HChar* msg, CEnt* ce)
+{
+   VG_(printf)("%s: fromC %s, used %llu, size %llu, offset %llu\n",
+               msg, ce->fromC ? "True" : "False",
+               (ULong)ce->used, (ULong)ce->size, (ULong)ce->off);
+}
+
+static Bool is_sane_CEnt ( const HChar* who, const DiImage* img, UInt i )
+{
+   vg_assert(img);
+   vg_assert(i <= CACHE_N_ENTRIES);
+
+   CEnt* ce = img->ces[i];
+   if (!(ce->used <= ce->size)) goto fail;
+   if (ce->fromC) {
+      // ce->size can be anything, but ce->used must be either the
+      // same or zero, in the case that it hasn't been set yet.  
+      // Similarly, ce->off must either be above the real_size 
+      // threshold, or zero if it hasn't been set yet.
+      if (!(ce->off >= img->real_size || ce->off == 0)) goto fail;
+      if (!(ce->off + ce->used <= img->size)) goto fail;
+      if (!(ce->used == ce->size || ce->used == 0)) goto fail;
+   } else {
+      if (!(ce->size == CACHE_ENTRY_SIZE)) goto fail;
+      if (!(ce->off >= 0)) goto fail;
+      if (!(ce->off + ce->used <= img->real_size)) goto fail;
+   }
+   return True;
+
+ fail:
+   VG_(printf)("is_sane_CEnt[%u]: fail: %s\n", i, who);
+   pp_CEnt("failing CEnt", ce);
+   return False;
+}
+
 
 /* A frame.  The first 4 bytes of |data| give the kind of the frame,
    and the rest of it is kind-specific data. */
@@ -395,7 +458,7 @@ static inline Bool is_in_CEnt ( const CEnt* cent, DiOffT off )
    /* This assertion is checked by set_CEnt, so checking it here has
       no benefit, whereas skipping it does remove it from the hottest
       path. */
-   /* vg_assert(cent->used > 0 && cent->used <= CACHE_ENTRY_SIZE); */
+   /* vg_assert(cent->used > 0 && cent->used <= cent->size); */
    /* What we want to return is:
         cent->off <= off && off < cent->off + cent->used;
       This is however a very hot path, so here's alternative that uses
@@ -415,16 +478,47 @@ static inline Bool is_in_CEnt ( const CEnt* cent, DiOffT off )
    return off - cent->off < cent->used;
 }
 
-/* Allocate a new CEnt, connect it to |img|, and return its index. */
-static UInt alloc_CEnt ( DiImage* img )
+/* Returns pointer to CSlc or NULL */
+static inline CSlc* find_cslc ( DiImage* img, DiOffT off )
 {
-   vg_assert(img);
+   for (UInt i = 0; i < img->cslc_used; i++) {
+      if ( (img->cslc[i].offD <= off)
+           && (img->cslc[i].offD + img->cslc[i].szD > off)
+         )
+         return &img->cslc[i];
+   }
+   return NULL;
+}
+
+/* Allocate a new CEnt, connect it to |img|, and return its index. */
+static UInt alloc_CEnt ( DiImage* img, SizeT szB, Bool fromC )
+{
+   vg_assert(img != NULL);
    vg_assert(img->ces_used < CACHE_N_ENTRIES);
+   if (fromC) {
+      // szB can be arbitrary
+   } else {
+      vg_assert(szB == CACHE_ENTRY_SIZE);
+   }
    UInt entNo = img->ces_used;
    img->ces_used++;
    vg_assert(img->ces[entNo] == NULL);
-   img->ces[entNo] = ML_(dinfo_zalloc)("di.alloc_CEnt.1", sizeof(CEnt));
+   img->ces[entNo] = ML_(dinfo_zalloc)("di.alloc_CEnt.1",
+                                       offsetof(CEnt, data) + szB);
+   img->ces[entNo]->size = szB;
+   img->ces[entNo]->fromC = fromC;
+   vg_assert(is_sane_CEnt("alloc_CEnt", img, entNo));
    return entNo;
+}
+
+static void realloc_CEnt ( DiImage* img, UInt entNo, SizeT szB )
+{
+   vg_assert(img != NULL);
+   vg_assert(szB >= CACHE_ENTRY_SIZE);
+   vg_assert(is_sane_CEnt("realloc_CEnt-pre", img, entNo));
+   img->ces[entNo] = ML_(dinfo_realloc)("di.realloc_CEnt.1",
+                                        img->ces[entNo],
+                                        offsetof(CEnt, data) + szB);
 }
 
 /* Move the given entry to the top and slide those above it down by 1,
@@ -449,23 +543,24 @@ static void set_CEnt ( const DiImage* img, UInt entNo, DiOffT off )
 {
    SizeT len;
    DiOffT off_orig = off;
-   vg_assert(img);
+   vg_assert(img != NULL);
    vg_assert(img->ces_used <= CACHE_N_ENTRIES);
    vg_assert(entNo >= 0 && entNo < img->ces_used);
-   vg_assert(off < img->size);
-   vg_assert(img->ces[entNo] != NULL);
+   vg_assert(off < img->real_size);
+   CEnt* ce = img->ces[entNo];
+   vg_assert(ce != NULL);
    /* Compute [off, +len) as the slice we are going to read. */
    off = block_round_down(off);
-   len = img->size - off;
-   if (len > CACHE_ENTRY_SIZE) len = CACHE_ENTRY_SIZE;
+   len = img->real_size - off;
+   if (len > ce->size)
+      len = ce->size;
    /* It is conceivable that the 'len > 0' bit could fail if we make
       an image with a zero sized file.  But then no 'get' request on
       that image would be valid. */
-   vg_assert(len > 0 && len <= CACHE_ENTRY_SIZE);
-   vg_assert(off + len <= img->size);
+   vg_assert(len > 0 && len <= ce->size);
+   vg_assert(off + len <= img->real_size);
    vg_assert(off <= off_orig && off_orig < off+len);
    /* So, read  off .. off+len-1  into the entry. */
-   CEnt* ce = img->ces[entNo];
 
    if (0) {
       static UInt t_last = 0;
@@ -546,7 +641,9 @@ static void set_CEnt ( const DiImage* img, UInt entNo, DiOffT off )
    
    ce->off  = off;
    ce->used = len;
-   vg_assert(ce->used > 0 && ce->used <= CACHE_ENTRY_SIZE);
+   ce->fromC = False;
+   vg_assert(ce == img->ces[entNo]);
+   vg_assert(is_sane_CEnt("set_CEnt", img, entNo));
 }
 
 __attribute__((noinline))
@@ -563,29 +660,144 @@ static UChar get_slowcase ( DiImage* img, DiOffT off )
       if (is_in_CEnt(img->ces[i], off))
          break;
    }
-   vg_assert(i <= img->ces_used);
-   if (i == img->ces_used) {
-      /* It's not in any entry.  Either allocate a new entry or
-         recycle the LRU one. */
-      if (img->ces_used == CACHE_N_ENTRIES) {
-         /* All entries in use.  Recycle the (ostensibly) LRU one. */
-         set_CEnt(img, CACHE_N_ENTRIES-1, off);
-         i = CACHE_N_ENTRIES-1;
-      } else {
-         /* Allocate a new one, and fill it in. */
-         UInt entNo = alloc_CEnt(img);
-         set_CEnt(img, entNo, off);
-         i = entNo;
-      }
-   } else {
-      /* We found it at position 'i'. */
-      vg_assert(i > 0);
+   vg_assert(i >= 1);
+
+   if (LIKELY(i < img->ces_used)) {
+      // Found it.  Move to the top and stop.
+      move_CEnt_to_top(img, i);
+      vg_assert(is_in_CEnt(img->ces[0], off));
+      return img->ces[0]->data[ off - img->ces[0]->off ];
    }
+
+   vg_assert(i <= img->ces_used);
+
+   // It's not in any entry.  Either allocate a new one or recycle the LRU
+   // one.  This is where the presence of compressed sections makes things
+   // tricky.  There are 4 cases to consider:
+   //
+   // (1) not from a compressed slice, we can allocate a new entry
+   // (2) not from a compressed slice, we have to recycle the LRU entry
+   // (3) from a compressed slice, we can allocate a new entry
+   // (4) from a compressed slice, we have to recycle the LRU entry
+   //
+   // Cases (3) and (4) are complex because we will have to call
+   // ML_(img_get_some) to get the compressed data.  But this function is
+   // reachable from ML_(img_get_some), so we may re-enter get_slowcase a
+   // second time as a result.  Given that the compressed data will be cause
+   // only cases (1) and (2) to happen, this guarantees no infinite recursion.
+   // It does however mean that we can't carry (in this function invokation)
+   // any local copies of the overall cache state across the ML_(img_get_some)
+   // call, since it may become invalidated by the recursive call to
+   // get_slowcase.
+
+   // First of all, see if it is in a compressed slice, and if so, pull the
+   // compressed data into an intermediate buffer.  Given the preceding
+   // comment, this is a safe place to do it, since we are not carrying any
+   // cache state here apart from the knowledge that the requested offset is
+   // not in the cache at all, and the recursive call won't change that fact.
+
+   CSlc* cslc = find_cslc(img, off);
+   UChar* cbuf = NULL;
+   if (cslc != NULL) {
+      SizeT len = 0;
+      cbuf = ML_(dinfo_zalloc)("di.image.get_slowcase.cbuf-1", cslc->szC);
+      // get compressed data
+      while (len < cslc->szC)
+         len += ML_(img_get_some)(cbuf + len, img, cslc->offC + len,
+                                  cslc->szC - len);
+   }
+
+   // Now we can do what we like.
+   vg_assert((cslc == NULL && cbuf == NULL) || (cslc != NULL && cbuf != NULL));
+
+   // Note, we can't capture this earlier, for exactly the reasons detailed
+   // above.
+   UInt ces_used_at_entry = img->ces_used;
+
+   // This is the size of the CEnt that we want to have after allocation or
+   // recycling.
+   SizeT size = (cslc == NULL) ? CACHE_ENTRY_SIZE : cslc->szD;
+
+   // Cases (1) and (3)
+   if (img->ces_used < CACHE_N_ENTRIES) {
+      /* Allocate a new cache entry, and fill it in. */
+      i = alloc_CEnt(img, size, /*fromC?*/cslc != NULL);
+      if (cslc == NULL) {
+         set_CEnt(img, i, off);
+         img->ces[i]->fromC = False;
+         vg_assert(is_sane_CEnt("get_slowcase-case-1", img, i));
+         vg_assert(img->ces_used == ces_used_at_entry + 1);
+      } else {
+         SizeT len = tinfl_decompress_mem_to_mem(
+                        img->ces[i]->data, cslc->szD,
+                        cbuf, cslc->szC,
+                        TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF
+                        | TINFL_FLAG_PARSE_ZLIB_HEADER);
+         vg_assert(len == cslc->szD); // sanity check on data, FIXME
+         vg_assert(cslc->szD == size);
+         img->ces[i]->used = cslc->szD;
+         img->ces[i]->off = cslc->offD;
+         img->ces[i]->fromC = True;
+         vg_assert(is_sane_CEnt("get_slowcase-case-3", img, i));
+         vg_assert(img->ces_used == ces_used_at_entry + 1);
+      }
+      vg_assert(img->ces_used == ces_used_at_entry + 1);
+      if (i > 0) {
+         move_CEnt_to_top(img, i);
+         i = 0;
+      }
+      vg_assert(is_in_CEnt(img->ces[i], off));
+      if (cbuf != NULL) {
+         ML_(dinfo_free)(cbuf);
+      }
+      return img->ces[i]->data[ off - img->ces[i]->off ];
+   }
+
+   // Cases (2) and (4)
+   /* All entries in use.  Recycle the (ostensibly) LRU one.  But try to find
+      a non-fromC entry to recycle, though, since discarding and reloading
+      fromC entries is very expensive.  The result is that -- unless all
+      CACHE_N_ENTRIES wind up being used by decompressed slices, which is
+      highly unlikely -- we'll wind up keeping all the decompressed data in
+      the cache for its entire remaining life.  We could probably do better
+      but it would make the cache management even more complex. */
+   vg_assert(img->ces_used == CACHE_N_ENTRIES);
+
+   // Select entry to recycle.
+   for (i = CACHE_N_ENTRIES-1; i > 0; i--) {
+      if (!img->ces[i]->fromC)
+         break;
+   }
+   vg_assert(i >= 0 && i < CACHE_N_ENTRIES);
+
+   realloc_CEnt(img, i, size);
+   img->ces[i]->size = size;
+   img->ces[i]->used = 0;
+   if (cslc == NULL) {
+      set_CEnt(img, i, off);
+      img->ces[i]->fromC = False;
+      vg_assert(is_sane_CEnt("get_slowcase-case-2", img, i));
+   } else {
+      SizeT len = tinfl_decompress_mem_to_mem(
+                     img->ces[i]->data, cslc->szD,
+                     cbuf, cslc->szC,
+                     TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF
+                     | TINFL_FLAG_PARSE_ZLIB_HEADER);
+      vg_assert(len == size);
+      img->ces[i]->used = size;
+      img->ces[i]->off = cslc->offD;
+      img->ces[i]->fromC = True;
+      vg_assert(is_sane_CEnt("get_slowcase-case-4", img, i));
+   }
+   vg_assert(img->ces_used == ces_used_at_entry);
    if (i > 0) {
       move_CEnt_to_top(img, i);
       i = 0;
    }
    vg_assert(is_in_CEnt(img->ces[i], off));
+   if (cbuf != NULL) {
+      ML_(dinfo_free)(cbuf);
+   }
    return img->ces[i]->data[ off - img->ces[i]->off ];
 }
 
@@ -633,8 +845,12 @@ DiImage* ML_(img_from_local_file)(const HChar* fullpath)
    img->source.is_local = True;
    img->source.fd       = sr_Res(fd);
    img->size            = size;
+   img->real_size       = size;
    img->ces_used        = 0;
    img->source.name     = ML_(dinfo_strdup)("di.image.ML_iflf.2", fullpath);
+   img->cslc            = NULL;
+   img->cslc_size       = 0;
+   img->cslc_used       = 0;
    /* img->ces is already zeroed out */
    vg_assert(img->source.fd >= 0);
 
@@ -643,7 +859,7 @@ DiImage* ML_(img_from_local_file)(const HChar* fullpath)
       loading it at this point forcing img->cent[0] to always be
       non-empty, thereby saving us an is-it-empty check on the fast
       path in get(). */
-   UInt entNo = alloc_CEnt(img);
+   UInt entNo = alloc_CEnt(img, CACHE_ENTRY_SIZE, False/*!fromC*/);
    vg_assert(entNo == 0);
    set_CEnt(img, 0, 0);
 
@@ -719,18 +935,22 @@ DiImage* ML_(img_from_di_server)(const HChar* filename,
    img->source.fd         = sd;
    img->source.session_id = session_id;
    img->size              = size;
+   img->real_size         = size;
    img->ces_used          = 0;
    img->source.name       = ML_(dinfo_zalloc)("di.image.ML_ifds.2",
                                               20 + VG_(strlen)(filename)
                                                  + VG_(strlen)(serverAddr));
    VG_(sprintf)(img->source.name, "%s at %s", filename, serverAddr);
+   img->cslc            = NULL;
+   img->cslc_size       = 0;
+   img->cslc_used       = 0;
 
    /* img->ces is already zeroed out */
    vg_assert(img->source.fd >= 0);
 
    /* See comment on equivalent bit in ML_(img_from_local_file) for
       rationale. */
-   UInt entNo = alloc_CEnt(img);
+   UInt entNo = alloc_CEnt(img, CACHE_ENTRY_SIZE, False/*!fromC*/);
    vg_assert(entNo == 0);
    set_CEnt(img, 0, 0);
 
@@ -756,9 +976,32 @@ DiImage* ML_(img_from_di_server)(const HChar* filename,
    return NULL;
 }
 
+DiOffT ML_(img_mark_compressed_part)(DiImage* img, DiOffT offset, SizeT szC,
+                                     SizeT szD)
+{
+   DiOffT ret;
+   vg_assert(img != NULL);
+   vg_assert(offset + szC <= img->size);
+
+   if (img->cslc_used == img->cslc_size) {
+      img->cslc_size += COMPRESSED_SLICE_ARRAY_GROW_SIZE;
+      img->cslc = ML_(dinfo_realloc)("di.image.ML_img_mark_compressed_part.1",
+                                     img->cslc, img->cslc_size * sizeof(CSlc));
+   }
+
+   ret = img->size;
+   img->cslc[img->cslc_used].offC = offset;
+   img->cslc[img->cslc_used].szC = szC;
+   img->cslc[img->cslc_used].offD = img->size;
+   img->cslc[img->cslc_used].szD = szD;
+   img->size += szD;
+   img->cslc_used++;
+   return ret;
+}
+
 void ML_(img_done)(DiImage* img)
 {
-   vg_assert(img);
+   vg_assert(img != NULL);
    if (img->source.is_local) {
       /* Close the file; nothing else to do. */
       vg_assert(img->source.session_id == 0);
@@ -782,18 +1025,25 @@ void ML_(img_done)(DiImage* img)
       vg_assert(img->ces[i] == NULL);
    }
    ML_(dinfo_free)(img->source.name);
+   ML_(dinfo_free)(img->cslc);
    ML_(dinfo_free)(img);
 }
 
 DiOffT ML_(img_size)(const DiImage* img)
 {
-   vg_assert(img);
+   vg_assert(img != NULL);
    return img->size;
+}
+
+DiOffT ML_(img_real_size)(const DiImage* img)
+{
+   vg_assert(img != NULL);
+   return img->real_size;
 }
 
 inline Bool ML_(img_valid)(const DiImage* img, DiOffT offset, SizeT size)
 {
-   vg_assert(img);
+   vg_assert(img != NULL);
    vg_assert(offset != DiOffT_INVALID);
    return img->size > 0 && offset + size <= (DiOffT)img->size;
 }
@@ -830,7 +1080,7 @@ static void ensure_valid(const DiImage* img, DiOffT offset, SizeT size,
 void ML_(img_get)(/*OUT*/void* dst,
                   DiImage* img, DiOffT offset, SizeT size)
 {
-   vg_assert(img);
+   vg_assert(img != NULL);
    vg_assert(size > 0);
    ensure_valid(img, offset, size, "ML_(img_get)");
    SizeT i;
@@ -842,7 +1092,7 @@ void ML_(img_get)(/*OUT*/void* dst,
 SizeT ML_(img_get_some)(/*OUT*/void* dst,
                         DiImage* img, DiOffT offset, SizeT size)
 {
-   vg_assert(img);
+   vg_assert(img != NULL);
    vg_assert(size > 0);
    ensure_valid(img, offset, size, "ML_(img_get_some)");
    UChar* dstU = (UChar*)dst;
@@ -1002,7 +1252,7 @@ UInt ML_(img_calc_gnu_debuglink_crc32)(DiImage* img)
       0x2d02ef8d
     };
 
-   vg_assert(img);
+   vg_assert(img != NULL);
 
    /* If the image is local, calculate the CRC here directly.  If it's
       remote, forward the request to the server. */

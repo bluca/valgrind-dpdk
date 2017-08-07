@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Nicholas Nethercote
+   Copyright (C) 2000-2017 Nicholas Nethercote
       njn@valgrind.org
 
    This program is free software; you can redistribute it and/or
@@ -83,8 +83,9 @@ asm(
 ".globl vgModuleLocal_call_on_new_stack_0_1\n"
 "vgModuleLocal_call_on_new_stack_0_1:\n"
 "   movl %esp, %esi\n"     // remember old stack pointer
-"   movl 4(%esi), %esp\n"  // set stack
-"   pushl 16(%esi)\n"      // arg1 to stack
+"   movl 4(%esi), %esp\n"  // set stack, assume %esp is now 16-byte aligned
+"   subl $12, %esp\n"      // skip 12 bytes
+"   pushl 16(%esi)\n"      // arg1 to stack, %esp is 16-byte aligned
 "   pushl  8(%esi)\n"      // retaddr to stack
 "   pushl 12(%esi)\n"      // f to stack
 "   movl $0, %eax\n"       // zero all GP regs
@@ -130,14 +131,7 @@ asm(
 #define __NR_CLONE        VG_STRINGIFY(__NR_clone)
 #define __NR_EXIT         VG_STRINGIFY(__NR_exit)
 
-extern
-Int do_syscall_clone_x86_linux ( Word (*fn)(void *), 
-                                 void* stack, 
-                                 Int   flags, 
-                                 void* arg,
-                                 Int*  child_tid, 
-                                 Int*  parent_tid, 
-                                 vki_modify_ldt_t * );
+// See priv_syswrap-linux.h for arg profile.
 asm(
 ".text\n"
 ".globl do_syscall_clone_x86_linux\n"
@@ -150,7 +144,8 @@ asm(
 "        movl     4+"FSZ"(%esp), %ecx\n"    /* syscall arg2: child stack */
 "        movl    12+"FSZ"(%esp), %ebx\n"    /* fn arg */
 "        movl     0+"FSZ"(%esp), %eax\n"    /* fn */
-"        lea     -8(%ecx), %ecx\n"          /* make space on stack */
+"        andl    $-16, %ecx\n"              /* align to 16-byte */
+"        lea     -20(%ecx), %ecx\n"         /* allocate 16*n+4 bytes on stack */
 "        movl    %ebx, 4(%ecx)\n"           /*   fn arg */
 "        movl    %eax, 0(%ecx)\n"           /*   fn */
 
@@ -165,7 +160,7 @@ asm(
 "        jnz     1f\n"
 
          /* CHILD - call thread function */
-"        popl    %eax\n"
+"        popl    %eax\n"                    /* child %esp is 16-byte aligned */
 "        call    *%eax\n"                   /* call fn */
 
          /* exit with result */
@@ -187,141 +182,6 @@ asm(
 #undef FSZ
 #undef __NR_CLONE
 #undef __NR_EXIT
-
-
-// forward declarations
-static void setup_child ( ThreadArchState*, ThreadArchState*, Bool );
-static SysRes sys_set_thread_area ( ThreadId, vki_modify_ldt_t* );
-
-/* 
-   When a client clones, we need to keep track of the new thread.  This means:
-   1. allocate a ThreadId+ThreadState+stack for the thread
-
-   2. initialize the thread's new VCPU state
-
-   3. create the thread using the same args as the client requested,
-   but using the scheduler entrypoint for EIP, and a separate stack
-   for ESP.
- */
-static SysRes do_clone ( ThreadId ptid, 
-                         UInt flags, Addr esp, 
-                         Int* parent_tidptr, 
-                         Int* child_tidptr, 
-                         vki_modify_ldt_t *tlsinfo)
-{
-   static const Bool debug = False;
-
-   ThreadId     ctid = VG_(alloc_ThreadState)();
-   ThreadState* ptst = VG_(get_ThreadState)(ptid);
-   ThreadState* ctst = VG_(get_ThreadState)(ctid);
-   UWord*       stack;
-   SysRes       res;
-   Int          eax;
-   vki_sigset_t blockall, savedmask;
-
-   VG_(sigfillset)(&blockall);
-
-   vg_assert(VG_(is_running_thread)(ptid));
-   vg_assert(VG_(is_valid_tid)(ctid));
-
-   stack = (UWord*)ML_(allocstack)(ctid);
-   if (stack == NULL) {
-      res = VG_(mk_SysRes_Error)( VKI_ENOMEM );
-      goto out;
-   }
-
-   /* Copy register state
-
-      Both parent and child return to the same place, and the code
-      following the clone syscall works out which is which, so we
-      don't need to worry about it.
-
-      The parent gets the child's new tid returned from clone, but the
-      child gets 0.
-
-      If the clone call specifies a NULL esp for the new thread, then
-      it actually gets a copy of the parent's esp.
-   */
-   /* Note: the clone call done by the Quadrics Elan3 driver specifies
-      clone flags of 0xF00, and it seems to rely on the assumption
-      that the child inherits a copy of the parent's GDT.  
-      setup_child takes care of setting that up. */
-   setup_child( &ctst->arch, &ptst->arch, True );
-
-   /* Make sys_clone appear to have returned Success(0) in the
-      child. */
-   ctst->arch.vex.guest_EAX = 0;
-
-   if (esp != 0)
-      ctst->arch.vex.guest_ESP = esp;
-
-   ctst->os_state.parent = ptid;
-
-   /* inherit signal mask */
-   ctst->sig_mask     = ptst->sig_mask;
-   ctst->tmp_sig_mask = ptst->sig_mask;
-
-   /* Start the child with its threadgroup being the same as the
-      parent's.  This is so that any exit_group calls that happen
-      after the child is created but before it sets its
-      os_state.threadgroup field for real (in thread_wrapper in
-      syswrap-linux.c), really kill the new thread.  a.k.a this avoids
-      a race condition in which the thread is unkillable (via
-      exit_group) because its threadgroup is not set.  The race window
-      is probably only a few hundred or a few thousand cycles long.
-      See #226116. */
-   ctst->os_state.threadgroup = ptst->os_state.threadgroup;
-
-   ML_(guess_and_register_stack) (esp, ctst);
-   
-   /* Assume the clone will succeed, and tell any tool that wants to
-      know that this thread has come into existence.  We cannot defer
-      it beyond this point because sys_set_thread_area, just below,
-      causes tCheck to assert by making references to the new ThreadId
-      if we don't state the new thread exists prior to that point.
-      If the clone fails, we'll send out a ll_exit notification for it
-      at the out: label below, to clean up. */
-   vg_assert(VG_(owns_BigLock_LL)(ptid));
-   VG_TRACK ( pre_thread_ll_create, ptid, ctid );
-
-   if (flags & VKI_CLONE_SETTLS) {
-      if (debug)
-	 VG_(printf)("clone child has SETTLS: tls info at %p: idx=%u "
-                     "base=%#lx limit=%x; esp=%#x fs=%x gs=%x\n",
-		     tlsinfo, tlsinfo->entry_number, 
-                     tlsinfo->base_addr, tlsinfo->limit,
-		     ptst->arch.vex.guest_ESP,
-		     ctst->arch.vex.guest_FS, ctst->arch.vex.guest_GS);
-      res = sys_set_thread_area(ctid, tlsinfo);
-      if (sr_isError(res))
-	 goto out;
-   }
-
-   flags &= ~VKI_CLONE_SETTLS;
-
-   /* start the thread with everything blocked */
-   VG_(sigprocmask)(VKI_SIG_SETMASK, &blockall, &savedmask);
-
-   /* Create the new thread */
-   eax = do_syscall_clone_x86_linux(
-            ML_(start_thread_NORETURN), stack, flags, &VG_(threads)[ctid],
-            child_tidptr, parent_tidptr, NULL
-         );
-   res = VG_(mk_SysRes_x86_linux)( eax );
-
-   VG_(sigprocmask)(VKI_SIG_SETMASK, &savedmask, NULL);
-
-  out:
-   if (sr_isError(res)) {
-      /* clone failed */
-      VG_(cleanup_thread)(&ctst->arch);
-      ctst->status = VgTs_Empty;
-      /* oops.  Better tell the tool the thread exited in a hurry :-) */
-      VG_TRACK( pre_thread_ll_exit, ctid );
-   }
-
-   return res;
-}
 
 
 /* ---------------------------------------------------------------------
@@ -434,11 +294,37 @@ void translate_to_hw_format ( /* IN  */ vki_modify_ldt_t* inn,
    out->LdtEnt.Words.word2 = entry_2;
 }
 
-/* Create a zeroed-out GDT. */
-static VexGuestX86SegDescr* alloc_zeroed_x86_GDT ( void )
+/* Create initial GDT. */
+static VexGuestX86SegDescr* alloc_system_x86_GDT ( void )
 {
    Int nbytes = VEX_GUEST_X86_GDT_NENT * sizeof(VexGuestX86SegDescr);
-   return VG_(calloc)("di.syswrap-x86.azxG.1", nbytes, 1);
+   VexGuestX86SegDescr* gdt = VG_(calloc)("di.syswrap-x86.azxG.1", nbytes, 1);
+   vki_modify_ldt_t info;
+   UShort seg;
+
+   VG_(memset)(&info, 0, sizeof(info));
+   info.entry_number    = 0;
+   info.base_addr       = 0;
+   info.limit           = 0xfffff;
+   info.seg_32bit       = 1;
+   info.contents        = 0;
+   info.read_exec_only  = 0;
+   info.limit_in_pages  = 1;
+   info.seg_not_present = 0;
+   info.useable         = 0;
+   info.reserved        = 0;
+
+   asm volatile("movw %%ds, %0" : : "m" (seg));
+   if (!(seg & 4)) translate_to_hw_format(&info, &gdt[seg >> 3], 0);
+   asm volatile("movw %%ss, %0" : : "m" (seg));
+   if (!(seg & 4)) translate_to_hw_format(&info, &gdt[seg >> 3], 0);
+
+   info.contents        = 2;
+
+   asm volatile("movw %%cs, %0" : : "m" (seg));
+   if (!(seg & 4)) translate_to_hw_format(&info, &gdt[seg >> 3], 0);
+
+   return gdt;
 }
 
 /* Create a zeroed-out LDT. */
@@ -484,16 +370,16 @@ static void deallocate_LGDTs_for_thread ( VexGuestX86State* vex )
 
    if (0)
       VG_(printf)("deallocate_LGDTs_for_thread: "
-                  "ldt = 0x%lx, gdt = 0x%lx\n",
+                  "ldt = 0x%llx, gdt = 0x%llx\n",
                   vex->guest_LDT, vex->guest_GDT );
 
    if (vex->guest_LDT != (HWord)NULL) {
-      free_LDT_or_GDT( (VexGuestX86SegDescr*)vex->guest_LDT );
+      free_LDT_or_GDT( (VexGuestX86SegDescr*)(HWord)vex->guest_LDT );
       vex->guest_LDT = (HWord)NULL;
    }
 
    if (vex->guest_GDT != (HWord)NULL) {
-      free_LDT_or_GDT( (VexGuestX86SegDescr*)vex->guest_GDT );
+      free_LDT_or_GDT( (VexGuestX86SegDescr*)(HWord)vex->guest_GDT );
       vex->guest_GDT = (HWord)NULL;
    }
 }
@@ -526,7 +412,7 @@ SysRes read_ldt ( ThreadId tid, UChar* ptr, UInt bytecount )
    vg_assert(sizeof(HWord) == sizeof(VexGuestX86SegDescr*));
    vg_assert(8 == sizeof(VexGuestX86SegDescr));
 
-   ldt = (UChar*)(VG_(threads)[tid].arch.vex.guest_LDT);
+   ldt = (UChar*)(HWord)(VG_(threads)[tid].arch.vex.guest_LDT);
    res = VG_(mk_SysRes_Success)( 0 );
    if (ldt == NULL)
       /* LDT not allocated, meaning all entries are null */
@@ -560,7 +446,7 @@ SysRes write_ldt ( ThreadId tid, void* ptr, UInt bytecount, Int oldmode )
    vg_assert(8 == sizeof(VexGuestX86SegDescr));
    vg_assert(sizeof(HWord) == sizeof(VexGuestX86SegDescr*));
 
-   ldt      = (VexGuestX86SegDescr*)VG_(threads)[tid].arch.vex.guest_LDT;
+   ldt      = (VexGuestX86SegDescr*)(HWord)VG_(threads)[tid].arch.vex.guest_LDT;
    ldt_info = (vki_modify_ldt_t*)ptr;
 
    res = VG_(mk_SysRes_Error)( VKI_EINVAL );
@@ -596,30 +482,39 @@ SysRes write_ldt ( ThreadId tid, void* ptr, UInt bytecount, Int oldmode )
 static SysRes sys_modify_ldt ( ThreadId tid,
                                Int func, void* ptr, UInt bytecount )
 {
+   /* Set return value to something "safe".  I think this will never
+      actually be returned, though. */
    SysRes ret = VG_(mk_SysRes_Error)( VKI_ENOSYS );
 
-   switch (func) {
-   case 0:
-      ret = read_ldt(tid, ptr, bytecount);
-      break;
-   case 1:
-      ret = write_ldt(tid, ptr, bytecount, 1);
-      break;
-   case 2:
-      VG_(unimplemented)("sys_modify_ldt: func == 2");
-      /* god knows what this is about */
-      /* ret = read_default_ldt(ptr, bytecount); */
-      /*UNREACHED*/
-      break;
-   case 0x11:
-      ret = write_ldt(tid, ptr, bytecount, 0);
-      break;
+   if (func != 0 && func != 1 && func != 2 && func != 0x11) {
+      ret = VG_(mk_SysRes_Error)( VKI_ENOSYS );
+   } else if (ptr != NULL && ! ML_(safe_to_deref)(ptr, bytecount)) {
+      ret = VG_(mk_SysRes_Error)( VKI_EFAULT );
+   } else {
+      switch (func) {
+      case 0:
+         ret = read_ldt(tid, ptr, bytecount);
+         break;
+      case 1:
+         ret = write_ldt(tid, ptr, bytecount, 1);
+         break;
+      case 2:
+         ret = VG_(mk_SysRes_Error)( VKI_ENOSYS );
+         VG_(unimplemented)("sys_modify_ldt: func == 2");
+         /* god knows what this is about */
+         /* ret = read_default_ldt(ptr, bytecount); */
+         /*UNREACHED*/
+         break;
+      case 0x11:
+         ret = write_ldt(tid, ptr, bytecount, 0);
+         break;
+      }
    }
    return ret;
 }
 
 
-static SysRes sys_set_thread_area ( ThreadId tid, vki_modify_ldt_t* info )
+SysRes ML_(x86_sys_set_thread_area) ( ThreadId tid, vki_modify_ldt_t* info )
 {
    Int                  idx;
    VexGuestX86SegDescr* gdt;
@@ -627,14 +522,16 @@ static SysRes sys_set_thread_area ( ThreadId tid, vki_modify_ldt_t* info )
    vg_assert(8 == sizeof(VexGuestX86SegDescr));
    vg_assert(sizeof(HWord) == sizeof(VexGuestX86SegDescr*));
 
-   if (info == NULL)
+   if (info == NULL || ! ML_(safe_to_deref)(info, sizeof(vki_modify_ldt_t))) {
+      VG_(umsg)("Warning: bad u_info address %p in set_thread_area\n", info);
       return VG_(mk_SysRes_Error)( VKI_EFAULT );
+   }
 
-   gdt = (VexGuestX86SegDescr*)VG_(threads)[tid].arch.vex.guest_GDT;
+   gdt = (VexGuestX86SegDescr*)(HWord)VG_(threads)[tid].arch.vex.guest_GDT;
 
    /* If the thread doesn't have a GDT, allocate it now. */
    if (!gdt) {
-      gdt = alloc_zeroed_x86_GDT();
+      gdt = alloc_system_x86_GDT();
       VG_(threads)[tid].arch.vex.guest_GDT = (HWord)gdt;
    }
 
@@ -679,19 +576,21 @@ static SysRes sys_get_thread_area ( ThreadId tid, vki_modify_ldt_t* info )
    vg_assert(sizeof(HWord) == sizeof(VexGuestX86SegDescr*));
    vg_assert(8 == sizeof(VexGuestX86SegDescr));
 
-   if (info == NULL)
+   if (info == NULL || ! ML_(safe_to_deref)(info, sizeof(vki_modify_ldt_t))) {
+      VG_(umsg)("Warning: bad u_info address %p in get_thread_area\n", info);
       return VG_(mk_SysRes_Error)( VKI_EFAULT );
+   }
 
    idx = info->entry_number;
 
    if (idx < 0 || idx >= VEX_GUEST_X86_GDT_NENT)
       return VG_(mk_SysRes_Error)( VKI_EINVAL );
 
-   gdt = (VexGuestX86SegDescr*)VG_(threads)[tid].arch.vex.guest_GDT;
+   gdt = (VexGuestX86SegDescr*)(HWord)VG_(threads)[tid].arch.vex.guest_GDT;
 
    /* If the thread doesn't have a GDT, allocate it now. */
    if (!gdt) {
-      gdt = alloc_zeroed_x86_GDT();
+      gdt = alloc_system_x86_GDT();
       VG_(threads)[tid].arch.vex.guest_GDT = (HWord)gdt;
    }
 
@@ -723,15 +622,9 @@ void VG_(cleanup_thread) ( ThreadArchState* arch )
 }  
 
 
-static void setup_child ( /*OUT*/ ThreadArchState *child, 
-                          /*IN*/  ThreadArchState *parent,
-                          Bool inherit_parents_GDT )
+void ML_(x86_setup_LDT_GDT) ( /*OUT*/ ThreadArchState *child, 
+                              /*IN*/  ThreadArchState *parent )
 {
-   /* We inherit our parent's guest state. */
-   child->vex = parent->vex;
-   child->vex_shadow1 = parent->vex_shadow1;
-   child->vex_shadow2 = parent->vex_shadow2;
-
    /* We inherit our parent's LDT. */
    if (parent->vex.guest_LDT == (HWord)NULL) {
       /* We hope this is the common case. */
@@ -739,8 +632,8 @@ static void setup_child ( /*OUT*/ ThreadArchState *child,
    } else {
       /* No luck .. we have to take a copy of the parent's. */
       child->vex.guest_LDT = (HWord)alloc_zeroed_x86_LDT();
-      copy_LDT_from_to( (VexGuestX86SegDescr*)parent->vex.guest_LDT, 
-                        (VexGuestX86SegDescr*)child->vex.guest_LDT );
+      copy_LDT_from_to( (VexGuestX86SegDescr*)(HWord)parent->vex.guest_LDT, 
+                        (VexGuestX86SegDescr*)(HWord)child->vex.guest_LDT );
    }
 
    /* Either we start with an empty GDT (the usual case) or inherit a
@@ -748,10 +641,10 @@ static void setup_child ( /*OUT*/ ThreadArchState *child,
       only). */
    child->vex.guest_GDT = (HWord)NULL;
 
-   if (inherit_parents_GDT && parent->vex.guest_GDT != (HWord)NULL) {
-      child->vex.guest_GDT = (HWord)alloc_zeroed_x86_GDT();
-      copy_GDT_from_to( (VexGuestX86SegDescr*)parent->vex.guest_GDT,
-                        (VexGuestX86SegDescr*)child->vex.guest_GDT );
+   if (parent->vex.guest_GDT != (HWord)NULL) {
+      child->vex.guest_GDT = (HWord)alloc_system_x86_GDT();
+      copy_GDT_from_to( (VexGuestX86SegDescr*)(HWord)parent->vex.guest_GDT,
+                        (VexGuestX86SegDescr*)(HWord)child->vex.guest_GDT );
    }
 }  
 
@@ -772,7 +665,6 @@ DECL_TEMPLATE(x86_linux, sys_stat64);
 DECL_TEMPLATE(x86_linux, sys_fstatat64);
 DECL_TEMPLATE(x86_linux, sys_fstat64);
 DECL_TEMPLATE(x86_linux, sys_lstat64);
-DECL_TEMPLATE(x86_linux, sys_clone);
 DECL_TEMPLATE(x86_linux, old_mmap);
 DECL_TEMPLATE(x86_linux, sys_mmap2);
 DECL_TEMPLATE(x86_linux, sys_sigreturn);
@@ -817,137 +709,6 @@ PRE(old_select)
          PRE_MEM_READ( "old_select(exceptfds)", a4, a1/8 /* __FD_SETSIZE/8 */ );
       if (a5 != (Addr)NULL)
          PRE_MEM_READ( "old_select(timeout)", a5, sizeof(struct vki_timeval) );
-   }
-}
-
-PRE(sys_clone)
-{
-   UInt cloneflags;
-   Bool badarg = False;
-
-   PRINT("sys_clone ( %lx, %#lx, %#lx, %#lx, %#lx )",ARG1,ARG2,ARG3,ARG4,ARG5);
-   PRE_REG_READ2(int, "clone",
-                 unsigned long, flags,
-                 void *, child_stack);
-
-   if (ARG1 & VKI_CLONE_PARENT_SETTID) {
-      if (VG_(tdict).track_pre_reg_read) {
-         PRA3("clone", int *, parent_tidptr);
-      }
-      PRE_MEM_WRITE("clone(parent_tidptr)", ARG3, sizeof(Int));
-      if (!VG_(am_is_valid_for_client)(ARG3, sizeof(Int), 
-                                             VKI_PROT_WRITE)) {
-         badarg = True;
-      }
-   }
-   if (ARG1 & VKI_CLONE_SETTLS) {
-      if (VG_(tdict).track_pre_reg_read) {
-         PRA4("clone", vki_modify_ldt_t *, tlsinfo);
-      }
-      PRE_MEM_READ("clone(tlsinfo)", ARG4, sizeof(vki_modify_ldt_t));
-      if (!VG_(am_is_valid_for_client)(ARG4, sizeof(vki_modify_ldt_t), 
-                                             VKI_PROT_READ)) {
-         badarg = True;
-      }
-   }
-   if (ARG1 & (VKI_CLONE_CHILD_SETTID | VKI_CLONE_CHILD_CLEARTID)) {
-      if (VG_(tdict).track_pre_reg_read) {
-         PRA5("clone", int *, child_tidptr);
-      }
-      PRE_MEM_WRITE("clone(child_tidptr)", ARG5, sizeof(Int));
-      if (!VG_(am_is_valid_for_client)(ARG5, sizeof(Int), 
-                                             VKI_PROT_WRITE)) {
-         badarg = True;
-      }
-   }
-
-   if (badarg) {
-      SET_STATUS_Failure( VKI_EFAULT );
-      return;
-   }
-
-   cloneflags = ARG1;
-
-   if (!ML_(client_signal_OK)(ARG1 & VKI_CSIGNAL)) {
-      SET_STATUS_Failure( VKI_EINVAL );
-      return;
-   }
-
-   /* Be ultra-paranoid and filter out any clone-variants we don't understand:
-      - ??? specifies clone flags of 0x100011
-      - ??? specifies clone flags of 0x1200011.
-      - NPTL specifies clone flags of 0x7D0F00.
-      - The Quadrics Elan3 driver specifies clone flags of 0xF00.
-      - Newer Quadrics Elan3 drivers with NTPL support specify 0x410F00.
-      Everything else is rejected. 
-   */
-   if (
-        1 ||
-        /* 11 Nov 05: for the time being, disable this ultra-paranoia.
-           The switch below probably does a good enough job. */
-          (cloneflags == 0x100011 || cloneflags == 0x1200011
-                                  || cloneflags == 0x7D0F00
-                                  || cloneflags == 0x790F00
-                                  || cloneflags == 0x3D0F00
-                                  || cloneflags == 0x410F00
-                                  || cloneflags == 0xF00
-                                  || cloneflags == 0xF21)) {
-     /* OK */
-   }
-   else {
-      /* Nah.  We don't like it.  Go away. */
-      goto reject;
-   }
-
-   /* Only look at the flags we really care about */
-   switch (cloneflags & (VKI_CLONE_VM | VKI_CLONE_FS 
-                         | VKI_CLONE_FILES | VKI_CLONE_VFORK)) {
-   case VKI_CLONE_VM | VKI_CLONE_FS | VKI_CLONE_FILES:
-      /* thread creation */
-      SET_STATUS_from_SysRes(
-         do_clone(tid,
-                  ARG1,         /* flags */
-                  (Addr)ARG2,   /* child ESP */
-                  (Int *)ARG3,  /* parent_tidptr */
-                  (Int *)ARG5,  /* child_tidptr */
-                  (vki_modify_ldt_t *)ARG4)); /* set_tls */
-      break;
-
-   case VKI_CLONE_VFORK | VKI_CLONE_VM: /* vfork */
-      /* FALLTHROUGH - assume vfork == fork */
-      cloneflags &= ~(VKI_CLONE_VFORK | VKI_CLONE_VM);
-
-   case 0: /* plain fork */
-      SET_STATUS_from_SysRes(
-         ML_(do_fork_clone)(tid,
-                       cloneflags,      /* flags */
-                       (Int *)ARG3,     /* parent_tidptr */
-                       (Int *)ARG5));   /* child_tidptr */
-      break;
-
-   default:
-   reject:
-      /* should we just ENOSYS? */
-      VG_(message)(Vg_UserMsg, "\n");
-      VG_(message)(Vg_UserMsg, "Unsupported clone() flags: 0x%lx\n", ARG1);
-      VG_(message)(Vg_UserMsg, "\n");
-      VG_(message)(Vg_UserMsg, "The only supported clone() uses are:\n");
-      VG_(message)(Vg_UserMsg, " - via a threads library (LinuxThreads or NPTL)\n");
-      VG_(message)(Vg_UserMsg, " - via the implementation of fork or vfork\n");
-      VG_(message)(Vg_UserMsg, " - for the Quadrics Elan3 user-space driver\n");
-      VG_(unimplemented)
-         ("Valgrind does not support general clone().");
-   }
-
-   if (SUCCESS) {
-      if (ARG1 & VKI_CLONE_PARENT_SETTID)
-         POST_MEM_WRITE(ARG3, sizeof(Int));
-      if (ARG1 & (VKI_CLONE_CHILD_SETTID | VKI_CLONE_CHILD_CLEARTID))
-         POST_MEM_WRITE(ARG5, sizeof(Int));
-
-      /* Thread creation was successful; let the child have the chance
-         to run */
-      *flags |= SfYieldAfter;
    }
 }
 
@@ -1048,7 +809,7 @@ PRE(sys_set_thread_area)
    PRE_MEM_READ( "set_thread_area(u_info)", ARG1, sizeof(vki_modify_ldt_t) );
 
    /* "do" the syscall ourselves; the kernel never sees it */
-   SET_STATUS_from_SysRes( sys_set_thread_area( tid, (void *)ARG1 ) );
+   SET_STATUS_from_SysRes( ML_(x86_sys_set_thread_area)( tid, (void *)ARG1 ) );
 }
 
 PRE(sys_get_thread_area)
@@ -1139,6 +900,9 @@ PRE(sys_ptrace)
 POST(sys_ptrace)
 {
    switch (ARG1) {
+   case VKI_PTRACE_TRACEME:
+      ML_(linux_POST_traceme)(tid);
+      break;
    case VKI_PTRACE_PEEKTEXT:
    case VKI_PTRACE_PEEKDATA:
    case VKI_PTRACE_PEEKUSR:
@@ -1538,7 +1302,7 @@ static SyscallTableEntry syscall_table[] = {
    GENX_(__NR_fsync,             sys_fsync),          // 118
    PLAX_(__NR_sigreturn,         sys_sigreturn),      // 119 ?/Linux
 
-   PLAX_(__NR_clone,             sys_clone),          // 120
+   LINX_(__NR_clone,             sys_clone),          // 120
 //zz    //   (__NR_setdomainname,     sys_setdomainname),  // 121 */*(?)
    GENXY(__NR_uname,             sys_newuname),       // 122
    PLAX_(__NR_modify_ldt,        sys_modify_ldt),     // 123
@@ -1766,7 +1530,7 @@ static SyscallTableEntry syscall_table[] = {
    LINX_(__NR_readlinkat,	 sys_readlinkat),       // 305
    LINX_(__NR_fchmodat,		 sys_fchmodat),         // 306
    LINX_(__NR_faccessat,	 sys_faccessat),        // 307
-   LINX_(__NR_pselect6,		 sys_pselect6),         // 308
+   LINXY(__NR_pselect6,		 sys_pselect6),         // 308
    LINXY(__NR_ppoll,		 sys_ppoll),            // 309
 
    LINX_(__NR_unshare,		 sys_unshare),          // 310
@@ -1820,12 +1584,27 @@ static SyscallTableEntry syscall_table[] = {
 //   LIN__(__NR_finit_module,      sys_ni_syscall),       // 350
 //   LIN__(__NR_sched_setattr,     sys_ni_syscall),       // 351
 //   LIN__(__NR_sched_getattr,     sys_ni_syscall),       // 352
-//   LIN__(__NR_renameat2,         sys_ni_syscall),       // 353
+   LINX_(__NR_renameat2,         sys_renameat2),        // 353
 //   LIN__(__NR_seccomp,           sys_ni_syscall),       // 354
 
    LINXY(__NR_getrandom,         sys_getrandom),        // 355
-   LINXY(__NR_memfd_create,      sys_memfd_create)      // 356
-//   LIN__(__NR_bpf,               sys_ni_syscall)        // 357
+   LINXY(__NR_memfd_create,      sys_memfd_create),     // 356
+//   LIN__(__NR_bpf,               sys_ni_syscall),       // 357
+   LINXY(__NR_socket,            sys_socket),           // 359
+   LINXY(__NR_socketpair,        sys_socketpair),       // 360
+   LINX_(__NR_bind,              sys_bind),             // 361
+   LINX_(__NR_connect,           sys_connect),          // 362
+   LINX_(__NR_listen,            sys_listen),           // 363
+   LINXY(__NR_accept4,           sys_accept4),          // 364
+   LINXY(__NR_getsockopt,        sys_getsockopt),       // 365
+   LINX_(__NR_setsockopt,        sys_setsockopt),       // 366
+   LINXY(__NR_getsockname,       sys_getsockname),      // 367
+   LINXY(__NR_getpeername,       sys_getpeername),      // 368
+   LINX_(__NR_sendto,            sys_sendto),           // 369
+   LINX_(__NR_sendmsg,           sys_sendmsg),          // 370
+   LINXY(__NR_recvfrom,          sys_recvfrom),         // 371
+   LINXY(__NR_recvmsg,           sys_recvmsg),          // 372
+   LINX_(__NR_shutdown,          sys_shutdown)          // 373
 };
 
 SyscallTableEntry* ML_(get_linux_syscall_entry) ( UInt sysno )

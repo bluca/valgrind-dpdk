@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -81,6 +81,7 @@ extern VgDetails VG_(details);
 typedef
    struct {
       Bool libc_freeres;
+      Bool cxx_freeres;
       Bool core_errors;
       Bool tool_errors;
       Bool superblock_discards;
@@ -168,21 +169,6 @@ typedef struct {
    void  (*tool___builtin_vec_delete)(ThreadId, void*);
    void* (*tool_realloc)             (ThreadId, void*, SizeT);
    SizeT (*tool_malloc_usable_size)  (ThreadId, void*);
-   void* (*tool_rte_malloc)          (ThreadId tid, const char *type,
-           SizeT n, unsigned align);
-   void* (*tool_rte_calloc)          (ThreadId tid, const char *type,
-           SizeT nmemb, SizeT size1, unsigned align);
-   void* (*tool_rte_zmalloc)         (ThreadId tid, const char *type,
-           SizeT n, unsigned align);
-   void* (*tool_rte_realloc)         (ThreadId tid, void* p,
-           SizeT new_size, unsigned align);
-   void* (*tool_rte_malloc_socket)   (ThreadId tid, const char *type,
-           SizeT n, unsigned align, int socket);
-   void* (*tool_rte_calloc_socket)   (ThreadId tid, const char *type,
-           SizeT nmemb, SizeT size1, unsigned align, int socket);
-   void* (*tool_rte_zmalloc_socket)  (ThreadId tid, const char *type,
-           SizeT n, unsigned align, int socket);
-   void  (*tool_rte_free)            (ThreadId tid, void* p);
    SizeT tool_client_redzone_szB;
 
    // VG_(needs).final_IR_tidy_pass

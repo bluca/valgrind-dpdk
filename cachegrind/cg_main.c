@@ -8,7 +8,7 @@
    This file is part of Cachegrind, a Valgrind tool for cache
    profiling programs.
 
-   Copyright (C) 2002-2015 Nicholas Nethercote
+   Copyright (C) 2002-2017 Nicholas Nethercote
       njn@valgrind.org
 
    This program is free software; you can redistribute it and/or
@@ -294,7 +294,7 @@ static LineCC* get_lineCC(Addr origAddr)
  * As this can be detected at instrumentation time, and results
  * in faster simulation, special-casing is benefical.
  *
- * Abbrevations used in var/function names:
+ * Abbreviations used in var/function names:
  *  IrNoX - instruction read does not cross cache lines
  *  IrGen - generic instruction read; not detected as IrNoX
  *  Ir    - not known / not important whether it is an IrNoX
@@ -914,7 +914,6 @@ void addEvent_Dr ( CgState* cgs, InstrInfo* inode, Int datasize, IRAtom* ea )
 static
 void addEvent_Dw ( CgState* cgs, InstrInfo* inode, Int datasize, IRAtom* ea )
 {
-   Event* lastEvt;
    Event* evt;
 
    tl_assert(isIRAtom(ea));
@@ -924,15 +923,16 @@ void addEvent_Dw ( CgState* cgs, InstrInfo* inode, Int datasize, IRAtom* ea )
       return;
 
    /* Is it possible to merge this write with the preceding read? */
-   lastEvt = &cgs->events[cgs->events_used-1];
-   if (cgs->events_used > 0
-       && lastEvt->tag       == Ev_Dr
-       && lastEvt->Ev.Dr.szB == datasize
-       && lastEvt->inode     == inode
-       && eqIRAtom(lastEvt->Ev.Dr.ea, ea))
-   {
-      lastEvt->tag   = Ev_Dm;
-      return;
+   if (cgs->events_used > 0) {
+      Event* lastEvt = &cgs->events[cgs->events_used-1];
+      if (   lastEvt->tag       == Ev_Dr
+          && lastEvt->Ev.Dr.szB == datasize
+          && lastEvt->inode     == inode
+          && eqIRAtom(lastEvt->Ev.Dr.ea, ea))
+      {
+         lastEvt->tag   = Ev_Dm;
+         return;
+      }
    }
 
    /* No.  Add as normal. */
@@ -1783,7 +1783,7 @@ static void cg_pre_clo_init(void)
    VG_(details_version)         (NULL);
    VG_(details_description)     ("a cache and branch-prediction profiler");
    VG_(details_copyright_author)(
-      "Copyright (C) 2002-2015, and GNU GPL'd, by Nicholas Nethercote et al.");
+      "Copyright (C) 2002-2017, and GNU GPL'd, by Nicholas Nethercote et al.");
    VG_(details_bug_reports_to)  (VG_BUGS_TO);
    VG_(details_avg_translation_sizeB) ( 500 );
 

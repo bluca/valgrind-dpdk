@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -254,7 +254,7 @@ extern SysRes VG_(am_mmap_file_float_valgrind)
 extern SysRes VG_(am_shared_mmap_file_float_valgrind)
    ( SizeT length, UInt prot, Int fd, Off64T offset );
 
-/* Convenience wrapper around VG_(am_mmap_anon_float_client) which also
+/* Similar to VG_(am_mmap_anon_float_client) but also
    marks the segment as containing the client heap. */
 extern SysRes VG_(am_mmap_client_heap) ( SizeT length, Int prot );
 
@@ -337,7 +337,7 @@ extern Bool VG_(am_relocate_nooverlap_client)( /*OUT*/Bool* need_discard,
 #if defined(VGP_ppc32_linux) \
     || defined(VGP_ppc64be_linux) || defined(VGP_ppc64le_linux)	\
     || defined(VGP_mips32_linux) || defined(VGP_mips64_linux) \
-    || defined(VGP_arm64_linux) || defined(VGP_tilegx_linux)
+    || defined(VGP_arm64_linux)
 # define VG_STACK_GUARD_SZB  65536  // 1 or 16 pages
 #else
 # define VG_STACK_GUARD_SZB  8192   // 2 pages
@@ -376,6 +376,11 @@ typedef
 extern Bool VG_(get_changed_segments)(
       const HChar* when, const HChar* where, /*OUT*/ChangedSeg* css,
       Int css_size, /*OUT*/Int* css_used);
+#endif
+
+#if defined(VGO_solaris)
+extern Bool VG_(am_search_for_new_segment)(Addr *start, SizeT *size,
+                                           UInt *prot);
 #endif
 
 #endif   // __PUB_CORE_ASPACEMGR_H

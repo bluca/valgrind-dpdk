@@ -8,7 +8,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -148,13 +148,16 @@ typedef
    } 
    Block;
 
+/* Ensure that Block payloads can be safely cast to various pointers below. */
+STATIC_ASSERT(VG_MIN_MALLOC_SZB % sizeof(void *) == 0);
+
 // A superblock.  'padding' is never used, it just ensures that if the
 // entire Superblock is aligned to VG_MIN_MALLOC_SZB, then payload_bytes[]
 // will be too.  It can add small amounts of padding unnecessarily -- eg.
 // 8-bytes on 32-bit machines with an 8-byte VG_MIN_MALLOC_SZB -- because
 // it's too hard to make a constant expression that works perfectly in all
 // cases.
-// 'unsplittable' is set to NULL if superblock can be splitted, otherwise
+// 'unsplittable' is set to NULL if superblock can be split, otherwise
 // it is set to the address of the superblock. An unsplittable superblock
 // will contain only one allocated block. An unsplittable superblock will
 // be unmapped when its (only) allocated block is freed.
@@ -198,7 +201,7 @@ typedef
       SizeT        min_unsplittable_sblock_szB;
       // Minimum unsplittable superblock size in bytes. To be marked as
       // unsplittable, a superblock must have a 
-      // size >= min_unsplittable_sblock_szB and cannot be splitted.
+      // size >= min_unsplittable_sblock_szB and cannot be split.
       // So, to avoid big overhead, superblocks used to provide aligned
       // blocks on big alignments are splittable.
       // Unsplittable superblocks will be reclaimed when their (only) 
@@ -296,8 +299,9 @@ static __inline__
 SizeT get_bszB_as_is ( Block* b )
 {
    UByte* b2     = (UByte*)b;
-   SizeT bszB_lo = *(SizeT*)&b2[0 + hp_overhead_szB()];
-   SizeT bszB_hi = *(SizeT*)&b2[mk_plain_bszB(bszB_lo) - sizeof(SizeT)];
+   SizeT bszB_lo = *ASSUME_ALIGNED(SizeT*, &b2[0 + hp_overhead_szB()]);
+   SizeT bszB_hi = *ASSUME_ALIGNED(SizeT*,
+                                   &b2[mk_plain_bszB(bszB_lo) - sizeof(SizeT)]);
    vg_assert2(bszB_lo == bszB_hi, 
       "Heap block lo/hi size mismatch: lo = %llu, hi = %llu.\n%s",
       (ULong)bszB_lo, (ULong)bszB_hi, probably_your_fault);
@@ -316,8 +320,8 @@ static __inline__
 void set_bszB ( Block* b, SizeT bszB )
 {
    UByte* b2 = (UByte*)b;
-   *(SizeT*)&b2[0 + hp_overhead_szB()]               = bszB;
-   *(SizeT*)&b2[mk_plain_bszB(bszB) - sizeof(SizeT)] = bszB;
+   *ASSUME_ALIGNED(SizeT*, &b2[0 + hp_overhead_szB()])               = bszB;
+   *ASSUME_ALIGNED(SizeT*, &b2[mk_plain_bszB(bszB) - sizeof(SizeT)]) = bszB;
 }
 
 //---------------------------------------------------------------------------
@@ -408,25 +412,27 @@ static __inline__
 void set_prev_b ( Block* b, Block* prev_p )
 { 
    UByte* b2 = (UByte*)b;
-   *(Block**)&b2[hp_overhead_szB() + sizeof(SizeT)] = prev_p;
+   *ASSUME_ALIGNED(Block**, &b2[hp_overhead_szB() + sizeof(SizeT)]) = prev_p;
 }
 static __inline__
 void set_next_b ( Block* b, Block* next_p )
 {
    UByte* b2 = (UByte*)b;
-   *(Block**)&b2[get_bszB(b) - sizeof(SizeT) - sizeof(void*)] = next_p;
+   *ASSUME_ALIGNED(Block**,
+                   &b2[get_bszB(b) - sizeof(SizeT) - sizeof(void*)]) = next_p;
 }
 static __inline__
 Block* get_prev_b ( Block* b )
 { 
    UByte* b2 = (UByte*)b;
-   return *(Block**)&b2[hp_overhead_szB() + sizeof(SizeT)];
+   return *ASSUME_ALIGNED(Block**, &b2[hp_overhead_szB() + sizeof(SizeT)]);
 }
 static __inline__
 Block* get_next_b ( Block* b )
 { 
    UByte* b2 = (UByte*)b;
-   return *(Block**)&b2[get_bszB(b) - sizeof(SizeT) - sizeof(void*)];
+   return *ASSUME_ALIGNED(Block**,
+                          &b2[get_bszB(b) - sizeof(SizeT) - sizeof(void*)]);
 }
 
 //---------------------------------------------------------------------------
@@ -437,14 +443,14 @@ void set_cc ( Block* b, const HChar* cc )
 { 
    UByte* b2 = (UByte*)b;
    vg_assert( VG_(clo_profile_heap) );
-   *(const HChar**)&b2[0] = cc;
+   *ASSUME_ALIGNED(const HChar**, &b2[0]) = cc;
 }
 static __inline__
 const HChar* get_cc ( Block* b )
 {
    UByte* b2 = (UByte*)b;
    vg_assert( VG_(clo_profile_heap) );
-   return *(const HChar**)&b2[0];
+   return *ASSUME_ALIGNED(const HChar**, &b2[0]);
 }
 
 //---------------------------------------------------------------------------
@@ -454,7 +460,7 @@ static __inline__
 Block* get_predecessor_block ( Block* b )
 {
    UByte* b2 = (UByte*)b;
-   SizeT  bszB = mk_plain_bszB( (*(SizeT*)&b2[-sizeof(SizeT)]) );
+   SizeT  bszB = mk_plain_bszB(*ASSUME_ALIGNED(SizeT*, &b2[-sizeof(SizeT)]));
    return (Block*)&b2[-bszB];
 }
 
@@ -550,7 +556,7 @@ static ArenaId arenaP_to_ArenaId ( Arena *a )
 }
 
 // Initialise an arena.  rz_szB is the (default) minimum redzone size;
-// It might be overriden by VG_(clo_redzone_size) or VG_(clo_core_redzone_size).
+// It might be overridden by VG_(clo_redzone_size) or VG_(clo_core_redzone_size).
 // it might be made bigger to ensure that VG_MIN_MALLOC_SZB is observed.
 static
 void arena_init ( ArenaId aid, const HChar* name, SizeT rz_szB,
@@ -1011,66 +1017,125 @@ Superblock* maybe_findSb ( Arena* a, Addr ad )
 // payload size, not block size.
 
 // Convert a payload size in bytes to a freelist number.
-static
+static __attribute__((noinline))
+UInt pszB_to_listNo_SLOW ( SizeT pszB__divided_by__VG_MIN_MALLOC_SZB )
+{
+   SizeT n = pszB__divided_by__VG_MIN_MALLOC_SZB;
+
+   if (n < 299) {
+      if (n < 114) {
+         if (n < 85) {
+            if (n < 74) {
+               /* -- Exponential slope up, factor 1.05 -- */
+               if (n < 67) return 64;
+               if (n < 70) return 65;
+               /* else */  return 66;
+            } else {
+               if (n < 77) return 67;
+               if (n < 81) return 68;
+               /* else */  return 69;
+            }
+         } else {
+            if (n < 99) {
+               if (n < 90) return 70;
+               if (n < 94) return 71;
+               /* else */  return 72;
+            } else {
+               if (n < 104) return 73;
+               if (n < 109) return 74;
+               /* else */   return 75;
+            }
+         }
+      } else {
+         if (n < 169) {
+            if (n < 133) {
+               if (n < 120) return 76;
+               if (n < 126) return 77;
+               /* else */   return 78;
+            } else {
+               if (n < 139) return 79;
+               /* -- Exponential slope up, factor 1.10 -- */
+               if (n < 153) return 80;
+               /* else */   return 81;
+            }
+         } else {
+            if (n < 224) {
+               if (n < 185) return 82;
+               if (n < 204) return 83;
+               /* else */   return 84;
+            } else {
+               if (n < 247) return 85;
+               if (n < 272) return 86;
+               /* else */   return 87;
+            }
+         }
+      }
+   } else {
+      if (n < 1331) {
+         if (n < 530) {
+            if (n < 398) {
+               if (n < 329) return 88;
+               if (n < 362) return 89;
+               /* else */   return 90;
+            } else {
+               if (n < 438) return 91;
+               if (n < 482) return 92;
+               /* else */   return 93;
+            }
+         } else {
+            if (n < 770) {
+               if (n < 583) return 94;
+               if (n < 641) return 95;
+               /* -- Exponential slope up, factor 1.20 -- */
+               /* else */   return 96;
+            } else {
+               if (n < 924) return 97;
+               if (n < 1109) return 98;
+               /* else */    return 99;
+            }
+         }
+      } else {
+         if (n < 3974) {
+            if (n < 2300) {
+               if (n < 1597) return 100;
+               if (n < 1916) return 101;
+               return 102;
+            } else {
+               if (n < 2760) return 103;
+               if (n < 3312) return 104;
+               /* else */    return 105;
+            }
+         } else {
+            if (n < 6868) {
+               if (n < 4769) return 106;
+               if (n < 5723) return 107;
+               /* else */    return 108;
+            } else {
+               if (n < 8241) return 109;
+               if (n < 9890) return 110;
+               /* else */    return 111;
+            }
+         }
+      }
+   }
+   /*NOTREACHED*/
+   vg_assert(0);
+}
+
+static inline
 UInt pszB_to_listNo ( SizeT pszB )
 {
    SizeT n = pszB / VG_MIN_MALLOC_SZB;
-   vg_assert(0 == pszB % VG_MIN_MALLOC_SZB);
+   vg_assert(0 == (pszB % VG_MIN_MALLOC_SZB));
 
    // The first 64 lists hold blocks of size VG_MIN_MALLOC_SZB * list_num.
-   // The final 48 hold bigger blocks.
-   if (n < 64)   return (UInt)n;
-   /* Exponential slope up, factor 1.05 */
-   if (n < 67) return 64;
-   if (n < 70) return 65;
-   if (n < 74) return 66;
-   if (n < 77) return 67;
-   if (n < 81) return 68;
-   if (n < 85) return 69;
-   if (n < 90) return 70;
-   if (n < 94) return 71;
-   if (n < 99) return 72;
-   if (n < 104) return 73;
-   if (n < 109) return 74;
-   if (n < 114) return 75;
-   if (n < 120) return 76;
-   if (n < 126) return 77;
-   if (n < 133) return 78;
-   if (n < 139) return 79;
-   /* Exponential slope up, factor 1.10 */
-   if (n < 153) return 80;
-   if (n < 169) return 81;
-   if (n < 185) return 82;
-   if (n < 204) return 83;
-   if (n < 224) return 84;
-   if (n < 247) return 85;
-   if (n < 272) return 86;
-   if (n < 299) return 87;
-   if (n < 329) return 88;
-   if (n < 362) return 89;
-   if (n < 398) return 90;
-   if (n < 438) return 91;
-   if (n < 482) return 92;
-   if (n < 530) return 93;
-   if (n < 583) return 94;
-   if (n < 641) return 95;
-   /* Exponential slope up, factor 1.20 */
-   if (n < 770) return 96;
-   if (n < 924) return 97;
-   if (n < 1109) return 98;
-   if (n < 1331) return 99;
-   if (n < 1597) return 100;
-   if (n < 1916) return 101;
-   if (n < 2300) return 102;
-   if (n < 2760) return 103;
-   if (n < 3312) return 104;
-   if (n < 3974) return 105;
-   if (n < 4769) return 106;
-   if (n < 5723) return 107;
-   if (n < 6868) return 108;
-   if (n < 8241) return 109;
-   if (n < 9890) return 110;
-   return 111;
+   // The final 48 hold bigger blocks and are dealt with by the _SLOW
+   // case.
+   if (LIKELY(n < 64)) {
+      return (UInt)n;
+   } else {
+      return pszB_to_listNo_SLOW(n);
+   }
 }
 
 // What is the minimum payload size for a given list?
@@ -1800,7 +1865,7 @@ void* VG_(arena_malloc) ( ArenaId aid, const HChar* cc, SizeT req_pszB )
    vg_assert(b_bszB >= req_bszB);
 
    // Could we split this block and still get a useful fragment?
-   // A block in an unsplittable superblock can never be splitted.
+   // A block in an unsplittable superblock can never be split.
    frag_bszB = b_bszB - req_bszB;
    if (frag_bszB >= min_useful_bszB(a)
        && (NULL == new_sb || ! new_sb->unsplittable)) {
@@ -1943,7 +2008,7 @@ void deferred_reclaimSuperblock ( Arena* a, Superblock* sb)
 
 /* b must be a free block, of size b_bszB.
    If b is followed by another free block, merge them.
-   If b is preceeded by another free block, merge them.
+   If b is preceded by another free block, merge them.
    If the merge results in the superblock being fully free,
    deferred_reclaimSuperblock the superblock. */
 static void mergeWithFreeNeighbours (Arena* a, Superblock* sb,
@@ -2039,7 +2104,7 @@ void VG_(arena_free) ( ArenaId aid, void* ptr )
    /* If this is one of V's areas, check carefully the block we're
       getting back.  This picks up simple block-end overruns. */
    if (aid != VG_AR_CLIENT)
-      vg_assert(blockSane(a, b));
+      vg_assert(is_inuse_block(b) && blockSane(a, b));
 
    b_bszB   = get_bszB(b);
    b_pszB   = bszB_to_pszB(a, b_bszB);
@@ -2189,7 +2254,7 @@ void* VG_(arena_memalign) ( ArenaId aid, const HChar* cc,
    {
       /* As we will split the block given back by VG_(arena_malloc),
          we have to (temporarily) disable unsplittable for this arena,
-         as unsplittable superblocks cannot be splitted. */
+         as unsplittable superblocks cannot be split. */
       const SizeT save_min_unsplittable_sblock_szB 
          = a->min_unsplittable_sblock_szB;
       a->min_unsplittable_sblock_szB = MAX_PSZB;
@@ -2603,115 +2668,6 @@ HChar* VG_(strdup) ( const HChar* cc, const HChar* s )
 void* VG_(perm_malloc) ( SizeT size, Int align  )
 {
    return VG_(arena_perm_malloc) ( VG_AR_CORE, size, align );
-}
-
-void* VG_(rte_malloc) ( const HChar* cc, const char *type, SizeT nbytes,
-        unsigned align )
-{
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return VG_(arena_memalign) ( VG_AR_CORE, cc, align, nbytes );
-}
-
-void* VG_(rte_calloc) ( const HChar* cc, const char *type, SizeT nmemb,
-        SizeT bytes_per_memb, unsigned align )
-{
-   SizeT  size;
-   void*  p;
-
-   size = nmemb * bytes_per_memb;
-   vg_assert(size >= nmemb && size >= bytes_per_memb);// check against overflow
-
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   p = VG_(arena_memalign) ( VG_AR_CORE, cc, align, size );
-
-   if (p != NULL)
-     VG_(memset)(p, 0, size);
-
-   return p;
-}
-
-void* VG_(rte_zmalloc) ( const HChar* cc, const char *type, SizeT n,
-        unsigned align )
-{
-   void*  p;
-
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   p = VG_(arena_memalign) ( VG_AR_CORE, cc, align, n );
-
-   if (p != NULL)
-     VG_(memset)(p, 0, n);
-
-   return p;
-}
-
-void* VG_(rte_realloc) ( const HChar* cc, void* ptr, SizeT size,
-        unsigned align )
-{
-   Arena* a;
-   SizeT  old_pszB;
-   void*  p_new;
-   Block* b;
-
-   ensure_mm_init(VG_AR_CORE);
-   a = arenaId_to_ArenaP(VG_AR_CORE);
-
-   vg_assert(size < MAX_PSZB);
-
-   if (NULL == ptr) {
-      return VG_(arena_memalign)(VG_AR_CORE, cc, align, size);
-   }
-
-   if (size == 0) {
-      VG_(arena_free)(VG_AR_CORE, ptr);
-      return NULL;
-   }
-
-   b = get_payload_block(a, ptr);
-   vg_assert(blockSane(a, b));
-
-   vg_assert(is_inuse_block(b));
-   old_pszB = get_pszB(a, b);
-
-   if (size <= old_pszB) {
-      return ptr;
-   }
-
-   p_new = VG_(arena_memalign) ( VG_AR_CORE, cc, align, size );
-
-   VG_(memcpy)(p_new, ptr, old_pszB);
-
-   VG_(arena_free)(VG_AR_CORE, ptr);
-
-   return p_new;
-}
-
-void* VG_(rte_malloc_socket) ( const HChar* cc, const char *type, SizeT nbytes,
-        unsigned align, int socket )
-{
-   return VG_(rte_malloc) ( cc, type, nbytes, align );
-}
-
-void* VG_(rte_calloc_socket) ( const HChar* cc, const char *type, SizeT nmemb,
-        SizeT bytes_per_memb, unsigned align, int socket )
-{
-   return VG_(rte_calloc) ( cc, type, nmemb, bytes_per_memb, align );
-}
-
-void* VG_(rte_zmalloc_socket) ( const HChar* cc, const char *type, SizeT n,
-        unsigned align, int socket )
-{
-   return VG_(rte_zmalloc) ( cc, type, n, align );
-}
-
-void VG_(rte_free) ( void* ptr )
-{
-   VG_(arena_free) ( VG_AR_CORE, ptr );
 }
 
 

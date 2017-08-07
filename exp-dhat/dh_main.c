@@ -7,7 +7,7 @@
    This file is part of DHAT, a Valgrind tool for profiling the
    heap usage of programs.
 
-   Copyright (C) 2010-2015 Mozilla Inc
+   Copyright (C) 2010-2017 Mozilla Inc
 
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License as
@@ -535,7 +535,7 @@ void die_block ( void* p, Bool custom_free )
 
 
 static
-void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB, SizeT align )
+void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
 {
    if (0) VG_(printf)("REALL %p %lu\n", p_old, new_req_szB);
    void* p_new = NULL;
@@ -576,7 +576,7 @@ void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB, SizeT align )
    } else {
 
       // New size is bigger;  make new block, copy shared contents, free old.
-      p_new = VG_(cli_malloc)(align, new_req_szB);
+      p_new = VG_(cli_malloc)(VG_(clo_alignment), new_req_szB);
       if (!p_new) {
          // Nb: if realloc fails, NULL is returned but the old block is not
          // touched.  What an awful function.
@@ -666,7 +666,7 @@ static void* dh_realloc ( ThreadId tid, void* p_old, SizeT new_szB )
       dh_free(tid, p_old);
       return NULL;
    }
-   return renew_block(tid, p_old, new_szB, VG_(clo_alignment));
+   return renew_block(tid, p_old, new_szB);
 }
 
 static SizeT dh_malloc_usable_size ( ThreadId tid, void* p )
@@ -674,86 +674,6 @@ static SizeT dh_malloc_usable_size ( ThreadId tid, void* p )
    Block* bk = find_Block_containing( (Addr)p );
    return bk ? bk->req_szB : 0;
 }                                                            
-
-static void* dh_rte_malloc ( ThreadId tid, const char *type, SizeT n,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return new_block( tid, NULL, n, align, False );
-}
-
-static void* dh_rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
-        SizeT size1, unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return new_block( tid, NULL, nmemb*size1, align, True );
-}
-
-static void* dh_rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return new_block( tid, NULL, n, align, True );
-}
-
-static void* dh_rte_realloc ( ThreadId tid, void* p_old, SizeT new_szB,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   if (p_old == NULL) {
-      return new_block( tid, NULL, new_szB, align, False );
-   }
-
-   if (new_szB == 0) {
-      dh_free(tid, p_old);
-      return NULL;
-   }
-
-   return renew_block(tid, p_old, new_szB, align);
-}
-
-static void* dh_rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket )
-{
-   return dh_rte_malloc ( tid, type, n, align );
-}
-
-static void* dh_rte_calloc_socket ( ThreadId tid, const char *type, SizeT nmemb,
-        SizeT size1, unsigned align, int socket )
-{
-   return dh_rte_calloc ( tid, type, nmemb, size1, align );
-}
-
-static void* dh_rte_zmalloc_socket ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket )
-{
-   return dh_rte_zmalloc ( tid, type, n, align );
-}
-
-static void dh_rte_free ( ThreadId tid, void* p )
-{
-   dh_free ( tid, p );
-}
 
 
 //------------------------------------------------------------//
@@ -1145,8 +1065,9 @@ static void dh_print_usage(void)
 "            sort the allocation points by the metric\n"
 "            defined by <string>, thusly:\n"
 "                max-bytes-live    maximum live bytes [default]\n"
-"                tot-bytes-allocd  total allocation (turnover)\n"
+"                tot-bytes-allocd  bytes allocated in total (turnover)\n"
 "                max-blocks-live   maximum live blocks\n"
+"                tot-blocks-allocd blocks allocated in total (turnover)\n"
    );
 }
 
@@ -1255,6 +1176,9 @@ static ULong get_metric__tot_bytes ( APInfo* api ) {
 static ULong get_metric__max_blocks_live ( APInfo* api ) {
    return api->max_blocks_live;
 }
+static ULong get_metric__tot_blocks ( APInfo* api ) {
+   return api->tot_blocks;
+}
 
 /* Given a string, return the metric-access function and also a Bool
    indicating whether we want increasing or decreasing values of the
@@ -1277,6 +1201,11 @@ static Bool identify_metric ( /*OUT*/ULong(**get_metricP)(APInfo*),
    }
    if (0 == VG_(strcmp)(metric_name, "max-blocks-live")) {
       *get_metricP = get_metric__max_blocks_live;
+      *increasingP = False;
+      return True;
+   }
+   if (0 == VG_(strcmp)(metric_name, "tot-blocks-allocd")) {
+      *get_metricP = get_metric__tot_blocks;
       *increasingP = False;
       return True;
    }
@@ -1428,7 +1357,7 @@ static void dh_pre_clo_init(void)
    VG_(details_version)         (NULL);
    VG_(details_description)     ("a dynamic heap analysis tool");
    VG_(details_copyright_author)(
-      "Copyright (C) 2010-2015, and GNU GPL'd, by Mozilla Inc");
+      "Copyright (C) 2010-2017, and GNU GPL'd, by Mozilla Inc");
    VG_(details_bug_reports_to)  (VG_BUGS_TO);
 
    // Basic functions.
@@ -1438,6 +1367,7 @@ static void dh_pre_clo_init(void)
 //zz
    // Needs.
    VG_(needs_libc_freeres)();
+   VG_(needs_cxx_freeres)();
    VG_(needs_command_line_options)(dh_process_cmd_line_option,
                                    dh_print_usage,
                                    dh_print_debug_usage);
@@ -1454,14 +1384,6 @@ static void dh_pre_clo_init(void)
                                    dh___builtin_vec_delete,
                                    dh_realloc,
                                    dh_malloc_usable_size,
-                                   dh_rte_malloc,
-                                   dh_rte_calloc,
-                                   dh_rte_zmalloc,
-                                   dh_rte_realloc,
-                                   dh_rte_malloc_socket,
-                                   dh_rte_calloc_socket,
-                                   dh_rte_zmalloc_socket,
-                                   dh_rte_free,
                                    0 );
 
    VG_(track_pre_mem_read)        ( dh_handle_noninsn_read );

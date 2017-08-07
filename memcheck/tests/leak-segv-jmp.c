@@ -163,30 +163,6 @@ extern UWord do_syscall_WRK (
                  : "v0", "v1", "a0", "a1", "a2", "a3", "$8", "$9");
    return out;
 }
-#elif defined(VGP_tilegx_linux)
-extern UWord do_syscall_WRK (
-          UWord syscall_no,
-          UWord a1, UWord a2, UWord a3,
-          UWord a4, UWord a5, UWord a6
-       )
-{
-   UWord out;
-   __asm__ __volatile__ (
-                 "move r10, %1\n\t"
-                 "move r0,  %2\n\t"
-                 "move r1,  %3\n\t"
-                 "move r2,  %4\n\t"
-                 "move r3,  %5\n\t"
-                 "move r4,  %6\n\t"
-                 "move r5,  %7\n\t"
-                 "swint1      \n\t"
-                 "move %0,  r0\n\t"
-                 : /*out*/ "=r" (out)
-                 : "r"(syscall_no), "r"(a1), "r"(a2), "r"(a3),
-                   "r"(a4), "r"(a5), "r"(a6)
-                 : "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r10");
-   return out;
-}
 
 #elif defined(VGP_x86_solaris)
 extern ULong
@@ -251,6 +227,7 @@ UWord do_syscall_WRK (UWord syscall_no,
 
 
 char **b10;
+char *interior_ptrs[3];
 int mprotect_result = 0;
 static void non_simd_mprotect (long tid, void* addr, long len)
 {
@@ -268,18 +245,31 @@ static void non_simd_mprotect (long tid, void* addr, long len)
 #endif
 }
 
+// can this work without global variable for return value?
+static void my_mprotect_none(void* addr, long len)
+{
+   if (RUNNING_ON_VALGRIND)
+     (void) VALGRIND_NON_SIMD_CALL2(non_simd_mprotect,
+                                    addr,
+                                    len);
+   else
+      mprotect_result = mprotect(addr,
+                                 len,
+                                 PROT_NONE);
+}
+
 void f(void)
 {
    long pagesize;
 #define RNDPAGEDOWN(a) ((long)a & ~(pagesize-1))
    int i;
-   const int nr_ptr = (10000 * 4)/sizeof(char*);
+   const int nr_ptr = (10000 * 20)/sizeof(char*);
 
    b10 = calloc (nr_ptr * sizeof(char*), 1);
    for (i = 0; i < nr_ptr; i++)
       b10[i] = (char*)b10;
    b10[4000] = malloc (1000);
-   
+
    fprintf(stderr, "expecting no leaks\n");
    fflush(stderr);
    VALGRIND_DO_LEAK_CHECK;
@@ -306,29 +296,41 @@ void f(void)
    if (pagesize == -1)
       perror ("sysconf failed");
    
-   if (RUNNING_ON_VALGRIND)
-     (void) VALGRIND_NON_SIMD_CALL2(non_simd_mprotect, RNDPAGEDOWN(&b10[4000]), 2 * pagesize);
-   else
-      mprotect_result = mprotect((void*) RNDPAGEDOWN(&b10[4000]), 2 * pagesize, PROT_NONE);
+   my_mprotect_none((void*) RNDPAGEDOWN(&b10[4000]), 2 * pagesize);
    fprintf(stderr, "mprotect result %d\n", mprotect_result);
 
    fprintf(stderr, "expecting a leak again\n");
    fflush(stderr);
    VALGRIND_DO_LEAK_CHECK;
 
-   if (RUNNING_ON_VALGRIND)
-     (void) VALGRIND_NON_SIMD_CALL2(non_simd_mprotect,
-                                    RNDPAGEDOWN(&b10[0]),
-                                    RNDPAGEDOWN(&(b10[nr_ptr-1]))
-                                    - RNDPAGEDOWN(&(b10[0])));
-   else
-      mprotect_result = mprotect((void*) RNDPAGEDOWN(&b10[0]),
+   my_mprotect_none((void*) RNDPAGEDOWN(&b10[0]),
                                  RNDPAGEDOWN(&(b10[nr_ptr-1]))
-                                 - RNDPAGEDOWN(&(b10[0])),
-                                 PROT_NONE);
+                                 - RNDPAGEDOWN(&(b10[0])));
    fprintf(stderr, "full mprotect result %d\n", mprotect_result);
 
    fprintf(stderr, "expecting a leak again after full mprotect\n");
+   fflush(stderr);
+   VALGRIND_DO_LEAK_CHECK;
+
+   // allocate memory but keep only interior pointers to trigger various
+   // heuristics
+   // Allocate some memory:
+   interior_ptrs[0] = calloc (nr_ptr * sizeof(char*), 1);
+
+   // Inner pointer after 3 sizeT: triggers the stdstring heuristic:
+   interior_ptrs[2] = interior_ptrs[0] + 3 * sizeof(size_t);
+
+   // Inner pointer after 1 ULong: triggers the length64 heuristic:
+   interior_ptrs[1] = interior_ptrs[0] + sizeof(unsigned long);
+
+   // Inner pointer after a size: triggers the newarray heuristics.
+   interior_ptrs[0] += sizeof(size_t);
+
+   my_mprotect_none( (void*) RNDPAGEDOWN((interior_ptrs[0] - sizeof(size_t))),
+                     RNDPAGEDOWN(nr_ptr * sizeof(char*)));
+   fprintf(stderr, "mprotect result %d\n", mprotect_result);
+
+   fprintf(stderr, "expecting heuristic not to crash after full mprotect\n");
    fflush(stderr);
    VALGRIND_DO_LEAK_CHECK;
 

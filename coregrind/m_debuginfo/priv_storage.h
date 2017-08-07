@@ -9,7 +9,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -75,14 +75,18 @@ typedef
                             the macros defined in pub_core_debuginfo.h */
       const HChar*  pri_name;  /* primary name, never NULL */
       const HChar** sec_names; /* NULL, or a NULL term'd array of other names */
-      // XXX: this could be shrunk (on 32-bit platforms) by using 30
-      // bits for the size and 1 bit each for isText and isIFunc.  If you
-      // do this, make sure that all assignments to the latter two use
-      // 0 or 1 (or True or False), and that a positive number larger
-      // than 1 is never used to represent True.
+      // XXX: DiSym could be shrunk (on 32-bit platforms to exactly 16
+      // bytes, on 64-bit platforms the first 3 pointers already add
+      // up to 24 bytes, so size plus bits will extend to 32 bytes
+      // anyway) by using 29 bits for the size and 1 bit each for
+      // isText, isIFunc and isGlobal.  If you do this, make sure that
+      // all assignments to the latter two use 0 or 1 (or True or
+      // False), and that a positive number larger than 1 is never
+      // used to represent True.
       UInt    size;    /* size in bytes */
       Bool    isText;
       Bool    isIFunc; /* symbol is an indirect function? */
+      Bool    isGlobal; /* Is this symbol globally visible? */
    }
    DiSym;
 
@@ -333,19 +337,6 @@ typedef
       Int   fp_off;
    }
    DiCfSI_m;
-#elif defined(VGA_tilegx)
-typedef
-   struct {
-      UChar cfa_how; /* a CFIC_IA value */
-      UChar ra_how;  /* a CFIR_ value */
-      UChar sp_how;  /* a CFIR_ value */
-      UChar fp_how;  /* a CFIR_ value */
-      Int   cfa_off;
-      Int   ra_off;
-      Int   sp_off;
-      Int   fp_off;
-   }
-   DiCfSI_m;
 #else
 #  error "Unknown arch"
 #endif
@@ -399,11 +390,7 @@ typedef
       Creg_S390_SP,
       Creg_S390_FP,
       Creg_S390_LR,
-      Creg_MIPS_RA,
-      Creg_TILEGX_IP,
-      Creg_TILEGX_SP,
-      Creg_TILEGX_BP,
-      Creg_TILEGX_LR
+      Creg_MIPS_RA
    }
    CfiReg;
 
@@ -909,7 +896,7 @@ struct _DebugInfo {
       cfsi_m_ix as in many case, one byte is good enough. For big
       objects, 2 bytes are needed. No object has yet been found where
       4 bytes are needed (but the code is ready to handle this case).
-      Not covered ranges ('cfi holes') are stored explicitely in
+      Not covered ranges ('cfi holes') are stored explicitly in
       cfsi_base/cfsi_m_ix as this is more memory efficient than storing
       a length for each covered range : on x86 or amd64, we typically have
       a hole every 8 covered ranges. On arm64, we have very few holes
@@ -1104,7 +1091,6 @@ extern void ML_(finish_CFSI_arrays) ( struct _DebugInfo* di );
 /* Find a symbol-table index containing the specified pointer, or -1
    if not found.  Binary search.  */
 extern Word ML_(search_one_symtab) ( const DebugInfo* di, Addr ptr,
-                                     Bool match_anywhere_in_sym,
                                      Bool findText );
 
 /* Find a location-table index containing the specified pointer, or -1

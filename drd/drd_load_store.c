@@ -1,7 +1,7 @@
 /*
   This file is part of drd, a thread error detector.
 
-  Copyright (C) 2006-2015 Bart Van Assche <bvanassche@acm.org>.
+  Copyright (C) 2006-2017 Bart Van Assche <bvanassche@acm.org>.
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License as
@@ -55,8 +55,6 @@
 #define STACK_POINTER_OFFSET OFFSET_mips32_r29
 #elif defined(VGA_mips64)
 #define STACK_POINTER_OFFSET OFFSET_mips64_r29
-#elif defined(VGA_tilegx)
-#define STACK_POINTER_OFFSET OFFSET_tilegx_r54
 #else
 #error Unknown architecture.
 #endif
@@ -180,7 +178,7 @@ VG_REGPARM(2) void DRD_(trace_load)(Addr addr, SizeT size)
 #ifdef ENABLE_DRD_CONSISTENCY_CHECKS
    /* The assert below has been commented out because of performance reasons.*/
    tl_assert(DRD_(thread_get_running_tid)()
-             == DRD_(VgThreadIdToDrdThreadId)(VG_(get_running_tid())));
+             == DRD_(VgThreadIdToDrdThreadId)(VG_(get_running_tid)()));
 #endif
 
    if (DRD_(running_thread_is_recording_loads)()
@@ -246,7 +244,7 @@ VG_REGPARM(2) void DRD_(trace_store)(Addr addr, SizeT size)
 #ifdef ENABLE_DRD_CONSISTENCY_CHECKS
    /* The assert below has been commented out because of performance reasons.*/
    tl_assert(DRD_(thread_get_running_tid)()
-             == DRD_(VgThreadIdToDrdThreadId)(VG_(get_running_tid())));
+             == DRD_(VgThreadIdToDrdThreadId)(VG_(get_running_tid)()));
 #endif
 
    if (DRD_(running_thread_is_recording_stores)()

@@ -1,7 +1,7 @@
 /*
   This file is part of drd, a thread error detector.
 
-  Copyright (C) 2006-2015 Bart Van Assche <bvanassche@acm.org>.
+  Copyright (C) 2006-2017 Bart Van Assche <bvanassche@acm.org>.
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License as
@@ -115,81 +115,6 @@ static void handle_free(ThreadId tid, void* p)
    tl_assert(success);
 }
 
-/** Helper function for realloc, to support alignment. */
-static void* renew_block(ThreadId tid, void* p_old, SizeT new_size, SizeT align)
-{
-   DRD_Chunk* mc;
-   void*      p_new;
-   SizeT      old_size;
-
-   if (! p_old)
-      return new_block(tid, new_size, align, /*is_zeroed*/False);
-
-   if (new_size == 0)
-   {
-      handle_free(tid, p_old);
-      return NULL;
-   }
-
-   s_cmalloc_n_mallocs++;
-   s_cmalloc_n_frees++;
-   s_cmalloc_bs_mallocd += new_size;
-
-   mc = VG_(HT_lookup)(s_malloc_list, (UWord)p_old);
-   if (mc == NULL)
-   {
-      tl_assert(0);
-      return NULL;
-   }
-
-   old_size = mc->size;
-
-   if (old_size == new_size)
-   {
-      /* size unchanged */
-      mc->where = VG_(record_ExeContext)(tid, 0);
-      p_new = p_old;
-   }
-   else if (new_size < old_size)
-   {
-      /* new size is smaller but nonzero */
-      s_stop_using_mem_callback(mc->data + new_size, old_size - new_size);
-      mc->size = new_size;
-      mc->where = VG_(record_ExeContext)(tid, 0);
-      p_new = p_old;
-   }
-   else
-   {
-      /* new size is bigger */
-      p_new = VG_(cli_malloc)(align, new_size);
-
-      if (p_new)
-      {
-         /* Copy from old to new. */
-         VG_(memcpy)(p_new, p_old, mc->size);
-
-         /* Free old memory. */
-         if (mc->size > 0)
-            s_stop_using_mem_callback(mc->data, mc->size);
-         VG_(cli_free)(p_old);
-         VG_(HT_remove)(s_malloc_list, (UWord)p_old);
-
-         /* Update state information. */
-         mc->data  = (Addr)p_new;
-         mc->size  = new_size;
-         mc->where = VG_(record_ExeContext)(tid, 0);
-         VG_(HT_add_node)(s_malloc_list, mc);
-         s_start_using_mem_callback((Addr)p_new, new_size, 0/*ec_uniq*/);
-      }
-      else
-      {
-         /* Allocation failed -- leave original block untouched. */
-      }
-   }
-
-   return p_new;
-}
-
 /**
  * Remove the information that was stored by DRD_(malloclike_block)() about
  * a memory block.
@@ -252,7 +177,76 @@ static void drd_free(ThreadId tid, void* p)
 */
 static void* drd_realloc(ThreadId tid, void* p_old, SizeT new_size)
 {
-   return renew_block(tid, p_old, new_size, VG_(clo_alignment));
+   DRD_Chunk* mc;
+   void*      p_new;
+   SizeT      old_size;
+
+   if (! p_old)
+      return drd_malloc(tid, new_size);
+
+   if (new_size == 0)
+   {
+      drd_free(tid, p_old);
+      return NULL;
+   }
+
+   s_cmalloc_n_mallocs++;
+   s_cmalloc_n_frees++;
+   s_cmalloc_bs_mallocd += new_size;
+
+   mc = VG_(HT_lookup)(s_malloc_list, (UWord)p_old);
+   if (mc == NULL)
+   {
+      tl_assert(0);
+      return NULL;
+   }
+
+   old_size = mc->size;
+
+   if (old_size == new_size)
+   {
+      /* size unchanged */
+      mc->where = VG_(record_ExeContext)(tid, 0);
+      p_new = p_old;
+   }
+   else if (new_size < old_size)
+   {
+      /* new size is smaller but nonzero */
+      s_stop_using_mem_callback(mc->data + new_size, old_size - new_size);
+      mc->size = new_size;
+      mc->where = VG_(record_ExeContext)(tid, 0);
+      p_new = p_old;
+   }
+   else
+   {
+      /* new size is bigger */
+      p_new = VG_(cli_malloc)(VG_(clo_alignment), new_size);
+
+      if (p_new)
+      {
+         /* Copy from old to new. */
+         VG_(memcpy)(p_new, p_old, mc->size);
+
+         /* Free old memory. */
+         if (mc->size > 0)
+            s_stop_using_mem_callback(mc->data, mc->size);
+         VG_(cli_free)(p_old);
+         VG_(HT_remove)(s_malloc_list, (UWord)p_old);
+
+         /* Update state information. */
+         mc->data  = (Addr)p_new;
+         mc->size  = new_size;
+         mc->where = VG_(record_ExeContext)(tid, 0);
+         VG_(HT_add_node)(s_malloc_list, mc);
+         s_start_using_mem_callback((Addr)p_new, new_size, 0/*ec_uniq*/);
+      }
+      else
+      {
+         /* Allocation failed -- leave original block untouched. */
+      }
+   }
+
+   return p_new;
 }
 
 /** Wrapper for __builtin_new(). */
@@ -294,77 +288,6 @@ static SizeT drd_malloc_usable_size(ThreadId tid, void* p)
    return mc ? mc->size : 0;
 }
 
-static void* drd_rte_malloc ( ThreadId tid, const char *type, SizeT n,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return new_block(tid, n, align, /*is_zeroed*/False);
-}
-
-static void* drd_rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
-        SizeT size1, unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return new_block(tid, nmemb*size1, align, /*is_zeroed*/True);
-}
-
-static void* drd_rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return new_block(tid, n, align, /*is_zeroed*/True);
-}
-
-static void* drd_rte_realloc ( ThreadId tid, void* p_old, SizeT new_szB,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return renew_block(tid, p_old, new_szB, align);
-}
-
-static void* drd_rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket )
-{
-   return drd_rte_malloc ( tid, type, n, align );
-}
-
-static void* drd_rte_calloc_socket ( ThreadId tid, const char *type,
-        SizeT nmemb, SizeT size1, unsigned align, int socket )
-{
-   return drd_rte_calloc ( tid, type, nmemb, size1, align );
-}
-
-static void* drd_rte_zmalloc_socket ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket )
-{
-   return drd_rte_zmalloc ( tid, type, n, align );
-}
-
-static void drd_rte_free ( ThreadId tid, void* p )
-{
-   drd_free ( tid, p );
-}
-
 void DRD_(register_malloc_wrappers)(const StartUsingMem start_callback,
                                     const StopUsingMem stop_callback)
 {
@@ -386,14 +309,6 @@ void DRD_(register_malloc_wrappers)(const StartUsingMem start_callback,
                                  drd___builtin_vec_delete,
                                  drd_realloc,
                                  drd_malloc_usable_size,
-                                 drd_rte_malloc,
-                                 drd_rte_calloc,
-                                 drd_rte_zmalloc,
-                                 drd_rte_realloc,
-                                 drd_rte_malloc_socket,
-                                 drd_rte_calloc_socket,
-                                 drd_rte_zmalloc_socket,
-                                 drd_rte_free,
                                  0);
 }
 

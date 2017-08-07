@@ -11,12 +11,12 @@
 
    Initial version (Annelid):
 
-   Copyright (C) 2003-2015 Nicholas Nethercote
+   Copyright (C) 2003-2017 Nicholas Nethercote
       njn@valgrind.org
 
    Valgrind-3.X port:
 
-   Copyright (C) 2008-2015 OpenWorks Ltd
+   Copyright (C) 2008-2017 OpenWorks Ltd
       info@open-works.co.uk
 
    This program is free software; you can redistribute it and/or
@@ -342,50 +342,6 @@ static void handle_free_heap( ThreadId tid, void* p )
    die_and_free_mem_heap( tid, seg );
 }
 
-static void* renew_block(ThreadId tid, void* p_old, SizeT new_size, SizeT align)
-{
-    Seg* seg;
-
-    /* First try and find the block. */
-    seg = find_Seg_by_addr( (Addr)p_old );
-    if (!seg)
-       return NULL;
-
-    tl_assert(seg->addr == (Addr)p_old);
-
-    if (new_size <= seg->szB) {
-       /* new size is smaller: allocate, copy from old to new */
-       Addr p_new = (Addr)VG_(cli_malloc)(align, new_size);
-       VG_(memcpy)((void*)p_new, p_old, new_size);
-
-       /* Free old memory */
-       die_and_free_mem_heap( tid, seg );
-
-       /* This has to be after die_and_free_mem_heap, otherwise the
-          former succeeds in shorting out the new block, not the
-          old, in the case when both are on the same list.  */
-       add_new_segment ( tid, p_new, new_size );
-
-       return (void*)p_new;
-    } else {
-       /* new size is bigger: allocate, copy from old to new */
-       Addr p_new = (Addr)VG_(cli_malloc)(align, new_size);
-       VG_(memcpy)((void*)p_new, p_old, seg->szB);
-
-       /* Free old memory */
-       die_and_free_mem_heap( tid, seg );
-
-       /* This has to be after die_and_free_mem_heap, otherwise the
-          former succeeds in shorting out the new block, not the old,
-          in the case when both are on the same list.  NB jrs
-          2008-Sept-11: not sure if this comment is valid/correct any
-          more -- I suspect not. */
-       add_new_segment ( tid, p_new, new_size );
-
-       return (void*)p_new;
-    }
-}
-
 
 /*------------------------------------------------------------*/
 /*--- malloc() et al replacements                          ---*/
@@ -451,7 +407,46 @@ void h_replace___builtin_vec_delete ( ThreadId tid, void* p )
 
 void* h_replace_realloc ( ThreadId tid, void* p_old, SizeT new_size )
 {
-   return renew_block(tid, p_old, new_size, VG_(clo_alignment));
+   Seg* seg;
+
+   /* First try and find the block. */
+   seg = find_Seg_by_addr( (Addr)p_old );
+   if (!seg)
+      return NULL;
+
+   tl_assert(seg->addr == (Addr)p_old);
+
+   if (new_size <= seg->szB) {
+      /* new size is smaller: allocate, copy from old to new */
+      Addr p_new = (Addr)VG_(cli_malloc)(VG_(clo_alignment), new_size);
+      VG_(memcpy)((void*)p_new, p_old, new_size);
+
+      /* Free old memory */
+      die_and_free_mem_heap( tid, seg );
+
+      /* This has to be after die_and_free_mem_heap, otherwise the
+         former succeeds in shorting out the new block, not the
+         old, in the case when both are on the same list.  */
+      add_new_segment ( tid, p_new, new_size );
+
+      return (void*)p_new;
+   } else {
+      /* new size is bigger: allocate, copy from old to new */
+      Addr p_new = (Addr)VG_(cli_malloc)(VG_(clo_alignment), new_size);
+      VG_(memcpy)((void*)p_new, p_old, seg->szB);
+
+      /* Free old memory */
+      die_and_free_mem_heap( tid, seg );
+
+      /* This has to be after die_and_free_mem_heap, otherwise the
+         former succeeds in shorting out the new block, not the old,
+         in the case when both are on the same list.  NB jrs
+         2008-Sept-11: not sure if this comment is valid/correct any
+         more -- I suspect not. */
+      add_new_segment ( tid, p_new, new_size );
+
+      return (void*)p_new;
+   }
 }
 
 SizeT h_replace_malloc_usable_size ( ThreadId tid, void* p )
@@ -461,77 +456,6 @@ SizeT h_replace_malloc_usable_size ( ThreadId tid, void* p )
    // There may be slop, but pretend there isn't because only the asked-for
    // area will have been shadowed properly.
    return ( seg ? seg->szB : 0 );
-}
-
-void* h_replace_rte_malloc ( ThreadId tid, const char *type, SizeT n,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return alloc_and_new_mem_heap ( tid, n, align, /*is_zeroed*/False );
-}
-
-void* h_replace_rte_calloc ( ThreadId tid, const char *type, SizeT nmemb,
-        SizeT size1, unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return alloc_and_new_mem_heap ( tid, nmemb*size1, align, /*is_zeroed*/True );
-}
-
-void* h_replace_rte_zmalloc ( ThreadId tid, const char *type, SizeT n,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return alloc_and_new_mem_heap ( tid, n, align, /*is_zeroed*/True );
-}
-
-void* h_replace_rte_realloc ( ThreadId tid, void* p_old, SizeT new_szB,
-        unsigned align )
-{
-   /* Round up to minimum alignment if necessary. */
-   if (align < VG_(clo_alignment))
-       align = VG_(clo_alignment);
-   /* Round up to nearest power-of-two if necessary (like glibc). */
-   while (0 != (align & (align - 1))) align++;
-
-   return renew_block(tid, p_old, new_szB, align);
-}
-
-void* h_replace_rte_malloc_socket ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket )
-{
-   return h_replace_rte_malloc ( tid, type, n, align );
-}
-
-void* h_replace_rte_calloc_socket ( ThreadId tid, const char *type, SizeT nmemb,
-        SizeT size1, unsigned align, int socket )
-{
-   return h_replace_rte_calloc ( tid, type, nmemb, size1, align );
-}
-
-void* h_replace_rte_zmalloc_socket ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket )
-{
-   return h_replace_rte_zmalloc ( tid, type, n, align );
-}
-
-void h_replace_rte_free ( ThreadId tid, void* p )
-{
-   h_replace_free ( tid, p );
 }
 
 

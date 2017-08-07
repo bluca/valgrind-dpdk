@@ -6,7 +6,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2007-2015 Apple Inc.
+   Copyright (C) 2007-2017 Apple Inc.
       Greg Parker  gparker@apple.com
 
    This program is free software; you can redistribute it and/or
@@ -26,6 +26,8 @@
 
    The GNU General Public License is contained in the file COPYING.
 */
+
+#include "pub_core_basics_asm.h"
 
 #if defined(VGP_amd64_darwin)
 
@@ -133,6 +135,9 @@ _semaphore_wait_signal:
 	ret
 
 #endif // defined(VGP_amd64_darwin)
+
+/* Let the linker know we don't need an executable stack */
+MARK_STACK_NO_EXEC
 
 /*--------------------------------------------------------------------*/
 /*--- end                                                          ---*/

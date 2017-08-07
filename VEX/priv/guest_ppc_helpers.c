@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2004-2015 OpenWorks LLP
+   Copyright (C) 2004-2017 OpenWorks LLP
       info@open-works.net
 
    This program is free software; you can redistribute it and/or
@@ -216,6 +216,221 @@ IRExpr* guest_ppc64_spechelper ( const HChar* function_name,
 }
 
 
+/*---------------------------------------------------------------*/
+/*--- Misc BCD clean helpers.                                 ---*/
+/*---------------------------------------------------------------*/
+
+/* NOTE, the clean and dirty helpers need to called using the
+ * fnptr_to_fnentry() function wrapper to handle the Big Endian
+ * pointer-to-function ABI and the Little Endian ABI.
+ */
+
+/* This C-helper takes a 128-bit BCD value as two 64-bit pieces.
+ * It checks the string to see if it is a valid 128-bit BCD value.
+ * A valid BCD value has a sign value in bits [3:0] between 0xA
+ * and 0xF inclusive. each of the BCD digits represented as a 4-bit
+ * hex number in bits BCD value[128:4] mut be between 0 and 9
+ * inclusive.  Returns an unsigned 64-bit value if valid.
+ */
+ULong is_BCDstring128_helper( ULong Signed, ULong bcd_string_hi,
+                              ULong bcd_string_low ) {
+   Int i;
+   ULong valid_bcd, sign_valid = False;
+   ULong digit;
+   UInt  sign;
+
+   if ( Signed == True ) {
+      sign = bcd_string_low & 0xF;
+      if( ( sign >= 0xA ) && ( sign <= 0xF ) )
+         sign_valid = True;
+
+      /* Change the sign digit to a zero
+       * so the for loop below works the same
+       * for signed and unsigned BCD stings
+       */
+      bcd_string_low &= 0xFFFFFFFFFFFFFFF0ULL;
+
+   } else {
+      sign_valid = True;  /* set sign to True so result is only
+                             based on the validity of the digits */
+   }
+
+   valid_bcd = True;  // Assume true to start
+   for( i = 0; i < 32; i++ ) {
+      /* check high and low 64-bit strings in parallel */
+      digit = bcd_string_low & 0xF;
+      if ( digit > 0x9 )
+         valid_bcd = False;
+      bcd_string_low = bcd_string_low >> 4;
+
+      digit = bcd_string_hi & 0xF;
+      if ( digit > 0x9 )
+         valid_bcd = False;
+      bcd_string_hi = bcd_string_hi >> 4;
+   }
+
+   return valid_bcd & sign_valid;
+}
+
+/* This clean helper takes a signed 32-bit BCD value and a carry in
+ * and adds 1 to the value of the BCD value.  The BCD value is passed
+ * in as a single 64-bit value.  The incremented value is returned in
+ * the lower 32 bits of the result.  If the input was signed the sign of
+ * the result is the same as the input.  The carry out is returned in
+ * bits [35:32] of the result.
+ */
+ULong increment_BCDstring32_helper( ULong Signed,
+                                    ULong bcd_string, ULong carry_in ) {
+   UInt i, num_digits = 8;
+   ULong bcd_value, result = 0;
+   ULong carry, digit, new_digit;
+
+   carry = carry_in;
+
+   if ( Signed == True ) {
+      bcd_value = bcd_string >> 4;   /* remove sign */
+      num_digits = num_digits - 1;
+   } else {
+      bcd_value = bcd_string;
+   }
+
+   for( i = 0; i < num_digits; i++ ) {
+      digit = bcd_value & 0xF;
+      bcd_value = bcd_value >> 4;
+      new_digit = digit + carry;
+
+      if ( new_digit > 10 ) {
+         carry = 1;
+         new_digit = new_digit - 10;
+
+      } else {
+         carry = 0;
+      }
+      result =  result | (new_digit << (i*4) );
+   }
+
+   if ( Signed == True ) {
+      result = ( carry << 32) | ( result << 4 ) | ( bcd_string & 0xF );
+   } else {
+      result = ( carry << 32) | result;
+   }
+
+   return result;
+}
+
+/*---------------------------------------------------------------*/
+/*--- Misc packed decimal clean helpers.                      ---*/
+/*---------------------------------------------------------------*/
+
+/* This C-helper takes a 64-bit packed decimal value stored in a
+ * 64-bit value. It converts the zoned decimal format.  The lower
+ * byte may contain a sign value, set it to zero.  If return_upper
+ * is zero, return lower 64 bits of result, otherwise return upper
+ * 64 bits of the result.
+ */
+ULong convert_to_zoned_helper( ULong src_hi, ULong src_low,
+                               ULong upper_byte, ULong return_upper ) {
+   UInt i, sh;
+   ULong tmp = 0, new_value;
+
+   /* Remove the sign from the source.  Put in the upper byte of result.
+    * Sign inserted later.
+    */
+   if ( return_upper == 0 ) {  /* return lower 64-bit result */
+      for(i = 0; i < 7; i++) {
+         sh = ( 8 - i ) * 4;
+         new_value = ( ( src_low >> sh ) & 0xf ) | upper_byte;
+         tmp = tmp | ( new_value <<  ( ( 7 - i ) * 8 ) );
+      }
+
+   } else {
+      /* Byte for i=0 is in upper 64-bit of the source, do it separately */
+      new_value = ( src_hi & 0xf ) | upper_byte;
+      tmp = tmp | new_value << 56;
+
+      for( i = 1; i < 8; i++ ) {
+         sh = ( 16 - i ) * 4;
+         new_value = ( ( src_low >> sh ) & 0xf ) | upper_byte;
+         tmp = tmp | ( new_value <<  ( ( 7 - i ) * 8 ) );
+      }
+   }
+   return tmp;
+}
+
+/* This C-helper takes the lower 64-bits of the 128-bit packed decimal
+ * src value.  It converts the src value to a 128-bit national format.
+ * If return_upper is zero, the helper returns lower 64 bits of result,
+ * otherwise it returns the upper 64-bits of the result.
+ */
+ULong convert_to_national_helper( ULong src, ULong return_upper ) {
+
+   UInt i;
+   UInt sh = 3, max = 4, min = 0;  /* initialize max, min for return upper */
+   ULong tmp = 0, new_value;
+
+   if ( return_upper == 0 ) {  /* return lower 64-bit result */
+      min = 4;
+      max = 7;
+      sh  = 7;
+   }
+
+   for( i = min; i < max; i++ ) {
+      new_value = ( ( src >> ( ( 7 - i ) * 4 ) ) & 0xf ) | 0x0030;
+      tmp = tmp | ( new_value <<  ( ( sh - i ) * 16 ) );
+   }
+   return tmp;
+}
+
+/* This C-helper takes a 128-bit zoned value stored in a 128-bit
+ * value. It converts it to the packed 64-bit decimal format without a
+ * a sign value.  The sign is supposed to be in bits [3:0] and the packed
+ * value in bits [67:4].  This helper leaves it to the caller to put the
+ * result into a V128 and shift the returned value over and put the sign
+ * in.
+ */
+ULong convert_from_zoned_helper( ULong src_hi, ULong src_low ) {
+   UInt i;
+   ULong tmp = 0, nibble;
+
+   /* Unroll the i = 0 iteration so the sizes of the loop for the upper
+    * and lower extraction match.  Skip sign in lease significant byte.
+    */
+   nibble = ( src_hi >> 56 ) & 0xF;
+   tmp = tmp | ( nibble << 60 );
+
+   for( i = 1; i < 8; i++ ) {
+      /* get the high nibbles, put into result */
+      nibble = ( src_hi >> ( ( 7 - i ) * 8 ) ) & 0xF;
+      tmp = tmp | ( nibble << ( ( 15 - i ) * 4 ) );
+
+      /* get the low nibbles, put into result */
+      nibble = ( src_low >> ( ( 8 - i ) * 8 ) ) & 0xF;
+      tmp = tmp | ( nibble << ( ( 8 - i ) * 4 ) );
+   }
+   return tmp;
+}
+
+/* This C-helper takes a 128-bit national value stored in a 128-bit
+ * value. It converts it to a signless packed 64-bit decimal format.
+ */
+ULong convert_from_national_helper( ULong src_hi, ULong src_low ) {
+   UInt i;
+   ULong tmp = 0, hword;
+
+   src_low = src_low & 0xFFFFFFFFFFFFFFF0ULL; /* remove the sign */
+
+   for( i = 0; i < 4; i++ ) {
+      /* get the high half-word, put into result */
+      hword = ( src_hi >> ( ( 3 - i ) * 16 ) ) & 0xF;
+      tmp = tmp | ( hword << ( ( 7 - i ) * 4 ) );
+
+      /* get the low half-word, put into result */
+      hword = ( src_low >> (  ( 3 - i ) * 16 ) ) & 0xF;
+      tmp = tmp | ( hword << ( ( 3 - i ) * 4 ) );
+   }
+   return tmp;
+}
+
 /*----------------------------------------------*/
 /*--- The exported fns ..                    ---*/
 /*----------------------------------------------*/
@@ -322,6 +537,8 @@ UInt LibVEX_GuestPPC32_get_XER ( /*IN*/const VexGuestPPC32State* vex_state )
    w |= ( (((UInt)vex_state->guest_XER_SO) & 0x1) << 31 );
    w |= ( (((UInt)vex_state->guest_XER_OV) & 0x1) << 30 );
    w |= ( (((UInt)vex_state->guest_XER_CA) & 0x1) << 29 );
+   w |= ( (((UInt)vex_state->guest_XER_OV32) & 0x1) << 19 );
+   w |= ( (((UInt)vex_state->guest_XER_CA32) & 0x1) << 18 );
    return w;
 }
 
@@ -335,6 +552,8 @@ UInt LibVEX_GuestPPC64_get_XER ( /*IN*/const VexGuestPPC64State* vex_state )
    w |= ( (((UInt)vex_state->guest_XER_SO) & 0x1) << 31 );
    w |= ( (((UInt)vex_state->guest_XER_OV) & 0x1) << 30 );
    w |= ( (((UInt)vex_state->guest_XER_CA) & 0x1) << 29 );
+   w |= ( (((UInt)vex_state->guest_XER_OV32) & 0x1) << 19 );
+   w |= ( (((UInt)vex_state->guest_XER_CA32) & 0x1) << 18 );
    return w;
 }
 
@@ -347,6 +566,8 @@ void LibVEX_GuestPPC32_put_XER ( UInt xer_native,
    vex_state->guest_XER_SO = toUChar((xer_native >> 31) & 0x1);
    vex_state->guest_XER_OV = toUChar((xer_native >> 30) & 0x1);
    vex_state->guest_XER_CA = toUChar((xer_native >> 29) & 0x1);
+   vex_state->guest_XER_OV32 = toUChar((xer_native >> 19) & 0x1);
+   vex_state->guest_XER_CA32 = toUChar((xer_native >> 18) & 0x1);
 }
 
 /* VISIBLE TO LIBVEX CLIENT */
@@ -358,6 +579,8 @@ void LibVEX_GuestPPC64_put_XER ( UInt xer_native,
    vex_state->guest_XER_SO = toUChar((xer_native >> 31) & 0x1);
    vex_state->guest_XER_OV = toUChar((xer_native >> 30) & 0x1);
    vex_state->guest_XER_CA = toUChar((xer_native >> 29) & 0x1);
+   vex_state->guest_XER_OV32 = toUChar((xer_native >> 19) & 0x1);
+   vex_state->guest_XER_CA32 = toUChar((xer_native >> 18) & 0x1);
 }
 
 /* VISIBLE TO LIBVEX CLIENT */
@@ -481,6 +704,9 @@ void LibVEX_GuestPPC32_initialise ( /*OUT*/VexGuestPPC32State* vex_state )
    vex_state->guest_XER_CA = 0;
    vex_state->guest_XER_BC = 0;
 
+   vex_state->guest_XER_OV32 = 0;
+   vex_state->guest_XER_CA32 = 0;
+
    vex_state->guest_CR0_321 = 0;
    vex_state->guest_CR0_0   = 0;
    vex_state->guest_CR1_321 = 0;
@@ -500,7 +726,7 @@ void LibVEX_GuestPPC32_initialise ( /*OUT*/VexGuestPPC32State* vex_state )
 
    vex_state->guest_FPROUND  = PPCrm_NEAREST;
    vex_state->guest_DFPROUND = PPCrm_NEAREST;
-   vex_state->pad1 = 0;
+   vex_state->guest_C_FPCC   = 0;
    vex_state->pad2 = 0;
 
    vex_state->guest_VRSAVE = 0;
@@ -525,7 +751,7 @@ void LibVEX_GuestPPC32_initialise ( /*OUT*/VexGuestPPC32State* vex_state )
    vex_state->guest_PSPB = 0x100;  // an arbitrary non-zero value to start with
 
    vex_state->padding1 = 0;
-   vex_state->padding2 = 0;
+   /*   vex_state->padding2 = 0;  currently not used */
 }
 
 
@@ -667,7 +893,7 @@ void LibVEX_GuestPPC64_initialise ( /*OUT*/VexGuestPPC64State* vex_state )
 
    vex_state->guest_FPROUND  = PPCrm_NEAREST;
    vex_state->guest_DFPROUND = PPCrm_NEAREST;
-   vex_state->pad1 = 0;
+   vex_state->guest_C_FPCC   = 0;
    vex_state->pad2 = 0;
 
    vex_state->guest_VRSAVE = 0;
@@ -820,7 +1046,7 @@ VexGuestLayout
 
           /* Describe any sections to be regarded by Memcheck as
              'always-defined'. */
-          .n_alwaysDefd = 11,
+          .n_alwaysDefd = 12,
 
           .alwaysDefd 
 	  = { /*  0 */ ALWAYSDEFD32(guest_CIA),
@@ -833,7 +1059,8 @@ VexGuestLayout
 	      /*  7 */ ALWAYSDEFD32(guest_NRADDR_GPR2),
 	      /*  8 */ ALWAYSDEFD32(guest_REDIR_SP),
 	      /*  9 */ ALWAYSDEFD32(guest_REDIR_STACK),
-	      /* 10 */ ALWAYSDEFD32(guest_IP_AT_SYSCALL)
+	      /* 10 */ ALWAYSDEFD32(guest_IP_AT_SYSCALL),
+	      /* 11 */ ALWAYSDEFD32(guest_C_FPCC)
             }
         };
 
@@ -861,7 +1088,7 @@ VexGuestLayout
 
           /* Describe any sections to be regarded by Memcheck as
              'always-defined'. */
-          .n_alwaysDefd = 11,
+          .n_alwaysDefd = 12,
 
           .alwaysDefd 
 	  = { /*  0 */ ALWAYSDEFD64(guest_CIA),
@@ -874,7 +1101,8 @@ VexGuestLayout
 	      /*  7 */ ALWAYSDEFD64(guest_NRADDR_GPR2),
 	      /*  8 */ ALWAYSDEFD64(guest_REDIR_SP),
 	      /*  9 */ ALWAYSDEFD64(guest_REDIR_STACK),
-	      /* 10 */ ALWAYSDEFD64(guest_IP_AT_SYSCALL)
+	      /* 10 */ ALWAYSDEFD64(guest_IP_AT_SYSCALL),
+	      /* 11 */ ALWAYSDEFD64(guest_C_FPCC)
             }
         };
 

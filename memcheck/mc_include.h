@@ -8,7 +8,7 @@
    This file is part of MemCheck, a heavyweight Valgrind tool for
    detecting memory errors.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -93,6 +93,9 @@ typedef
       Addr          pool;           // pool identifier
       SizeT         rzB;            // pool red-zone size
       Bool          is_zeroed;      // allocations from this pool are zeroed
+      Bool          auto_free;      // De-alloc block frees all chunks in block
+      Bool          metapool;       // These chunks are VALGRIND_MALLOC_LIKE
+                                    // memory, and used as pool.
       VgHashTable  *chunks;         // chunks associated with this pool
    }
    MC_Mempool;
@@ -105,7 +108,8 @@ void* MC_(new_block)  ( ThreadId tid,
 void MC_(handle_free) ( ThreadId tid,
                         Addr p, UInt rzB, MC_AllocKind kind );
 
-void MC_(create_mempool)  ( Addr pool, UInt rzB, Bool is_zeroed );
+void MC_(create_mempool)  ( Addr pool, UInt rzB, Bool is_zeroed,
+                            Bool auto_free, Bool metapool );
 void MC_(destroy_mempool) ( Addr pool );
 void MC_(mempool_alloc)   ( ThreadId tid, Addr pool,
                             Addr addr, SizeT size );
@@ -114,6 +118,7 @@ void MC_(mempool_trim)    ( Addr pool, Addr addr, SizeT size );
 void MC_(move_mempool)    ( Addr poolA, Addr poolB );
 void MC_(mempool_change)  ( Addr pool, Addr addrA, Addr addrB, SizeT size );
 Bool MC_(mempool_exists)  ( Addr pool );
+Bool MC_(is_mempool_block)( MC_Chunk* mc_search );
 
 /* Searches for a recently freed block which might bracket Addr a.
    Return the MC_Chunk* for this block or NULL if no bracketting block
@@ -139,6 +144,8 @@ void MC_(make_mem_undefined_w_otag)( Addr a, SizeT len, UInt otag );
 void MC_(make_mem_defined)         ( Addr a, SizeT len );
 void MC_(copy_address_range_state) ( Addr src, Addr dst, SizeT len );
 
+void MC_(xtmemory_report) ( const HChar* filename, Bool fini );
+
 void MC_(print_malloc_stats) ( void );
 /* nr of free operations done */
 SizeT MC_(get_cmalloc_n_frees) ( void );
@@ -153,22 +160,6 @@ void  MC_(__builtin_delete)     ( ThreadId tid, void* p );
 void  MC_(__builtin_vec_delete) ( ThreadId tid, void* p );
 void* MC_(realloc)              ( ThreadId tid, void* p, SizeT new_size );
 SizeT MC_(malloc_usable_size)   ( ThreadId tid, void* p );
-
-void* MC_(rte_malloc)           ( ThreadId tid, const char *type, SizeT n,
-        unsigned align );
-void* MC_(rte_calloc)           ( ThreadId tid, const char *type, SizeT nmemb,
-        SizeT size1, unsigned align );
-void* MC_(rte_zmalloc)          ( ThreadId tid, const char *type, SizeT n,
-        unsigned align );
-void* MC_(rte_realloc)          ( ThreadId tid, void* p, SizeT new_size,
-        unsigned align );
-void* MC_(rte_malloc_socket)    ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket );
-void* MC_(rte_calloc_socket)    ( ThreadId tid, const char *type, SizeT nmemb,
-        SizeT size1, unsigned align, int socket );
-void* MC_(rte_zmalloc_socket)   ( ThreadId tid, const char *type, SizeT n,
-        unsigned align, int socket );
-void  MC_(rte_free)             ( ThreadId tid, void* p );
 
 void MC_(handle_resizeInPlace)(ThreadId tid, Addr p,
                                SizeT oldSizeB, SizeT newSizeB, SizeT rzB);
@@ -332,6 +323,12 @@ enum {
    MCPE_DIE_MEM_STACK_128,
    MCPE_DIE_MEM_STACK_144,
    MCPE_DIE_MEM_STACK_160,
+   MCPE_MAKE_STACK_UNINIT_W_O,
+   MCPE_MAKE_STACK_UNINIT_NO_O,
+   MCPE_MAKE_STACK_UNINIT_128_NO_O,
+   MCPE_MAKE_STACK_UNINIT_128_NO_O_ALIGNED_16,
+   MCPE_MAKE_STACK_UNINIT_128_NO_O_ALIGNED_8,
+   MCPE_MAKE_STACK_UNINIT_128_NO_O_SLOWCASE,
    /* Do not add enumerators past this line. */
    MCPE_LAST
 };
@@ -389,7 +386,7 @@ typedef
                         //   least one interior-pointer along the way.
       IndirectLeak =2,  // Leaked, but reachable from another leaked block
                         //   (be it Unreached or IndirectLeak).
-      Unreached    =3,  // Not reached, ie. leaked. 
+      Unreached    =3   // Not reached, ie. leaked. 
                         //   (At best, only reachable from itself via a cycle.)
   }
   Reachedness;
@@ -464,6 +461,7 @@ typedef
       LeakCheckDeltaMode deltamode;
       UInt max_loss_records_output; // limit on the nr of loss records output.
       Bool requested_by_monitor_command; // True when requested by gdb/vgdb.
+      const HChar* xt_filename; // if != NULL, produce an xtree leak file.
    }
    LeakCheckParams;
 
@@ -576,6 +574,10 @@ void MC_(pp_describe_addr) (Addr a);
 
 /* Is this address in a user-specified "ignored range" ? */
 Bool MC_(in_ignored_range) ( Addr a );
+
+/* Is this address in a user-specified "ignored range of offsets below
+   the current thread's stack pointer?" */
+Bool MC_(in_ignored_range_below_sp) ( Addr sp, Addr a, UInt szB );
 
 
 /*------------------------------------------------------------*/
@@ -720,6 +722,12 @@ extern Bool MC_(clo_show_mismatched_frees);
    operations? Default: NO */
 extern Bool MC_(clo_expensive_definedness_checks);
 
+/* Do we have a range of stack offsets to ignore?  Default: NO */
+extern Bool MC_(clo_ignore_range_below_sp);
+extern UInt MC_(clo_ignore_range_below_sp__first_offset);
+extern UInt MC_(clo_ignore_range_below_sp__last_offset);
+
+
 /*------------------------------------------------------------*/
 /*--- Instrumentation                                      ---*/
 /*------------------------------------------------------------*/
@@ -765,8 +773,14 @@ VG_REGPARM(1) UWord MC_(helperc_LOADV16be)  ( Addr );
 VG_REGPARM(1) UWord MC_(helperc_LOADV16le)  ( Addr );
 VG_REGPARM(1) UWord MC_(helperc_LOADV8)     ( Addr );
 
-void MC_(helperc_MAKE_STACK_UNINIT) ( Addr base, UWord len,
-                                                 Addr nia );
+VG_REGPARM(3)
+void MC_(helperc_MAKE_STACK_UNINIT_w_o) ( Addr base, UWord len, Addr nia );
+
+VG_REGPARM(2)
+void MC_(helperc_MAKE_STACK_UNINIT_no_o) ( Addr base, UWord len );
+
+VG_REGPARM(1)
+void MC_(helperc_MAKE_STACK_UNINIT_128_no_o) ( Addr base );
 
 /* Origin tag load/store helpers */
 VG_REGPARM(2) void  MC_(helperc_b_store1) ( Addr a, UWord d32 );
@@ -791,6 +805,9 @@ IRSB* MC_(instrument) ( VgCallbackClosure* closure,
                         IRType gWordTy, IRType hWordTy );
 
 IRSB* MC_(final_tidy) ( IRSB* );
+
+/* Check some assertions to do with the instrumentation machinery. */
+void MC_(do_instrumentation_startup_checks)( void );
 
 #endif /* ndef __MC_INCLUDE_H */
 

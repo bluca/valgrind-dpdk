@@ -12,7 +12,7 @@
   This file is part of DRD, a Valgrind tool for verification of
   multithreaded programs.
 
-  Copyright (C) 2006-2015 Bart Van Assche <bvanassche@acm.org>.
+  Copyright (C) 2006-2017 Bart Van Assche <bvanassche@acm.org>.
   All rights reserved.
 
   Redistribution and use in source and binary forms, with or without
@@ -67,13 +67,13 @@
 #define DRD_GET_VALGRIND_THREADID                                          \
     (unsigned)VALGRIND_DO_CLIENT_REQUEST_EXPR(0,                           \
                                    VG_USERREQ__DRD_GET_VALGRIND_THREAD_ID, \
-                                   0, 0, 0, 0, 0, 0)
+                                   0, 0, 0, 0, 0)
 
 /** Obtain the thread ID assigned by DRD. */
 #define DRD_GET_DRD_THREADID                                            \
     (unsigned)VALGRIND_DO_CLIENT_REQUEST_EXPR(0,                        \
                                    VG_USERREQ__DRD_GET_DRD_THREAD_ID,   \
-                                   0, 0, 0, 0, 0, 0)
+                                   0, 0, 0, 0, 0)
 
 
 /** Tell DRD not to complain about data races for the specified variable. */
@@ -82,7 +82,7 @@
 /** Tell DRD to no longer ignore data races for the specified variable. */
 #define DRD_STOP_IGNORING_VAR(x)                                       \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_FINISH_SUPPRESSION, \
-                                   &(x), sizeof(x), 0, 0, 0, 0)
+                                   &(x), sizeof(x), 0, 0, 0)
 
 /**
  * Tell DRD to trace all memory accesses for the specified variable
@@ -90,14 +90,14 @@
  */
 #define DRD_TRACE_VAR(x)                                             \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_START_TRACE_ADDR, \
-                                   &(x), sizeof(x), 0, 0, 0, 0)
+                                   &(x), sizeof(x), 0, 0, 0)
 
 /**
  * Tell DRD to stop tracing memory accesses for the specified variable.
  */
 #define DRD_STOP_TRACING_VAR(x)                                       \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_STOP_TRACE_ADDR, \
-                                   &(x), sizeof(x), 0, 0, 0, 0)
+                                   &(x), sizeof(x), 0, 0, 0)
 
 /**
  * @defgroup RaceDetectionAnnotations Data race detection annotations.
@@ -116,7 +116,7 @@
  */
 #define ANNOTATE_HAPPENS_BEFORE(addr)                                       \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_HAPPENS_BEFORE, \
-                                   addr, 0, 0, 0, 0, 0)
+                                   addr, 0, 0, 0, 0)
 
 /**
  * Tell DRD that the memory accesses executed after this annotation will
@@ -128,7 +128,7 @@
  */
 #define ANNOTATE_HAPPENS_AFTER(addr)                                       \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_HAPPENS_AFTER, \
-                                   addr, 0, 0, 0, 0, 0)
+                                   addr, 0, 0, 0, 0)
 
 #else /* __HELGRIND_H */
 
@@ -218,12 +218,12 @@
 /** Tell DRD that a reader-writer lock object has been initialized. */
 #define ANNOTATE_RWLOCK_CREATE(rwlock)                                     \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_RWLOCK_CREATE, \
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
 
 /** Tell DRD that a reader-writer lock object has been destroyed. */
 #define ANNOTATE_RWLOCK_DESTROY(rwlock)                                     \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_RWLOCK_DESTROY, \
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
 
 /**
  * Tell DRD that a reader-writer lock has been acquired. is_w == 1 means that
@@ -232,7 +232,7 @@
  */
 #define ANNOTATE_RWLOCK_ACQUIRED(rwlock, is_w)                               \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_RWLOCK_ACQUIRED, \
-                                   rwlock, is_w, 0, 0, 0, 0)
+                                   rwlock, is_w, 0, 0, 0)
 
 #endif /* __HELGRIND_H */
 
@@ -257,7 +257,7 @@
  */
 #define ANNOTATE_RWLOCK_RELEASED(rwlock, is_w)                               \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_RWLOCK_RELEASED, \
-                                   rwlock, is_w, 0, 0, 0, 0);
+                                   rwlock, is_w, 0, 0, 0);
 
 #endif /* __HELGRIND_H */
 
@@ -274,27 +274,27 @@
 /** Tell DRD that a semaphore object is going to be initialized. */
 #define ANNOTATE_SEM_INIT_PRE(sem, value)                                 \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_SEM_INIT_PRE, \
-                                   sem, value, 0, 0, 0, 0);
+                                   sem, value, 0, 0, 0);
 
 /** Tell DRD that a semaphore object has been destroyed. */
 #define ANNOTATE_SEM_DESTROY_POST(sem)                                        \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_SEM_DESTROY_POST, \
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
 
 /** Tell DRD that a semaphore is going to be acquired. */
 #define ANNOTATE_SEM_WAIT_PRE(sem)                                        \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_SEM_WAIT_PRE, \
-                                   sem, 0, 0, 0, 0, 0)
+                                   sem, 0, 0, 0, 0)
 
 /** Tell DRD that a semaphore has been acquired. */
 #define ANNOTATE_SEM_WAIT_POST(sem)                                        \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_SEM_WAIT_POST, \
-                                   sem, 0, 0, 0, 0, 0)
+                                   sem, 0, 0, 0, 0)
 
 /** Tell DRD that a semaphore is going to be released. */
 #define ANNOTATE_SEM_POST_PRE(sem)                                        \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATE_SEM_POST_PRE, \
-                                   sem, 0, 0, 0, 0, 0)
+                                   sem, 0, 0, 0, 0)
 
 /*
  * Report that a barrier has been initialized with a given barrier count.  The
@@ -305,25 +305,25 @@
 #define ANNOTATE_BARRIER_INIT(barrier, count, reinitialization_allowed) \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATION_UNIMP,    \
                                    "ANNOTATE_BARRIER_INIT", barrier,    \
-                                   count, reinitialization_allowed, 0, 0)
+                                   count, reinitialization_allowed, 0)
 
 /* Report that a barrier has been destroyed. */
 #define ANNOTATE_BARRIER_DESTROY(barrier)                               \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATION_UNIMP,    \
                                    "ANNOTATE_BARRIER_DESTROY",          \
-                                   barrier, 0, 0, 0, 0)
+                                   barrier, 0, 0, 0)
 
 /* Report that the calling thread is about to start waiting for a barrier. */
 #define ANNOTATE_BARRIER_WAIT_BEFORE(barrier)                           \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATION_UNIMP,    \
                                    "ANNOTATE_BARRIER_WAIT_BEFORE",      \
-                                   barrier, 0, 0, 0, 0)
+                                   barrier, 0, 0, 0)
 
 /* Report that the calling thread has just finished waiting for a barrier. */
 #define ANNOTATE_BARRIER_WAIT_AFTER(barrier)                            \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_ANNOTATION_UNIMP,    \
                                    "ANNOTATE_BARRIER_WAIT_AFTER",       \
-                                   barrier, 0, 0, 0, 0)
+                                   barrier, 0, 0, 0)
 
 /**
  * Tell DRD that a FIFO queue has been created. The abbreviation PCQ stands for
@@ -361,28 +361,28 @@
    the memory range [addr, addr + size). */
 #define ANNOTATE_BENIGN_RACE_SIZED(addr, size, descr)                   \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_START_SUPPRESSION,   \
-                                   addr, size, 0, 0, 0, 0)
+                                   addr, size, 0, 0, 0)
 
 /** Tell DRD to ignore all reads performed by the current thread. */
 #define ANNOTATE_IGNORE_READS_BEGIN()                                \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_RECORD_LOADS,     \
-                                   0, 0, 0, 0, 0, 0);
+                                   0, 0, 0, 0, 0);
 
 
 /** Tell DRD to no longer ignore the reads performed by the current thread. */
 #define ANNOTATE_IGNORE_READS_END()                                  \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_RECORD_LOADS,     \
-                                   1, 0, 0, 0, 0, 0);
+                                   1, 0, 0, 0, 0);
 
 /** Tell DRD to ignore all writes performed by the current thread. */
 #define ANNOTATE_IGNORE_WRITES_BEGIN()                                \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_RECORD_STORES,     \
-                                   0, 0, 0, 0, 0, 0)
+                                   0, 0, 0, 0, 0)
 
 /** Tell DRD to no longer ignore the writes performed by the current thread. */
 #define ANNOTATE_IGNORE_WRITES_END()                                  \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_RECORD_STORES,     \
-                                   1, 0, 0, 0, 0, 0)
+                                   1, 0, 0, 0, 0)
 
 /** Tell DRD to ignore all memory accesses performed by the current thread. */
 #define ANNOTATE_IGNORE_READS_AND_WRITES_BEGIN() \
@@ -401,7 +401,7 @@
  */
 #define ANNOTATE_NEW_MEMORY(addr, size)                           \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_CLEAN_MEMORY,  \
-                                   addr, size, 0, 0, 0, 0)
+                                   addr, size, 0, 0, 0)
 
 /** Ask DRD to report every access to the specified address. */
 #define ANNOTATE_TRACE_MEMORY(addr) DRD_TRACE_VAR(*(char*)(addr))
@@ -412,7 +412,7 @@
  */
 #define ANNOTATE_THREAD_NAME(name)                                      \
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_SET_THREAD_NAME,     \
-                                   name, 0, 0, 0, 0, 0)
+                                   name, 0, 0, 0, 0)
 
 /*@}*/
 

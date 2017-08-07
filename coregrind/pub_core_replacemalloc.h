@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -52,21 +52,6 @@ struct vg_mallocfunc_info {
    void* (*tl_realloc)             (ThreadId tid, void* p, SizeT size);
    SizeT (*tl_malloc_usable_size)  (ThreadId tid, void* payload);
    void  (*mallinfo)               (ThreadId tid, struct vg_mallinfo* mi);
-   void* (*tl_rte_malloc)          (ThreadId tid, const char *type, SizeT n,
-           unsigned align);
-   void* (*tl_rte_calloc)          (ThreadId tid, const char *type, SizeT nmemb,
-           SizeT size1, unsigned align);
-   void* (*tl_rte_zmalloc)         (ThreadId tid, const char *type, SizeT n,
-           unsigned align);
-   void* (*tl_rte_realloc)         (ThreadId tid, void* p, SizeT new_size,
-           unsigned align);
-   void* (*tl_rte_malloc_socket)   (ThreadId tid, const char *type, SizeT n,
-           unsigned align, int socket);
-   void* (*tl_rte_calloc_socket)   (ThreadId tid, const char *type, SizeT nmemb,
-           SizeT size1, unsigned align, int socket);
-   void* (*tl_rte_zmalloc_socket)  (ThreadId tid, const char *type, SizeT n,
-           unsigned align, int socket);
-   void  (*tl_rte_free)            (ThreadId tid, void* p);
    Bool	clo_trace_malloc;
 };
 

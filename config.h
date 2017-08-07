@@ -10,6 +10,9 @@
 /* DARWIN_VERS value for Mac OS X 10.11 */
 /* #undef DARWIN_10_11 */
 
+/* DARWIN_VERS value for macOS 10.12 */
+/* #undef DARWIN_10_12 */
+
 /* DARWIN_VERS value for Mac OS X 10.5 */
 /* #undef DARWIN_10_5 */
 
@@ -46,9 +49,6 @@
 
 /* Define to 1 if strlen() has been optimized heavily (amd64 glibc >= 2.10) */
 #define GLIBC_MANDATORY_STRLEN_REDIRECT 1
-
-/* Define to 1 if gcc/as can do Altivec. */
-/* #undef HAS_ALTIVEC */
 
 /* Define to 1 if you have the <asm/unistd.h> header file. */
 #define HAVE_ASM_UNISTD_H 1
@@ -87,6 +87,12 @@
 
 /* Define to 1 if you have a dlinfo that can do RTLD_DI_TLS_MODID. */
 #define HAVE_DLINFO_RTLD_DI_TLS_MODID 1
+
+/* Define to 1 if the system has the type `Elf32_Chdr'. */
+#define HAVE_ELF32_CHDR 1
+
+/* Define to 1 if the system has the type `Elf64_Chdr'. */
+#define HAVE_ELF64_CHDR 1
 
 /* Define to 1 if you have the <endian.h> header file. */
 #define HAVE_ENDIAN_H 1
@@ -263,6 +269,9 @@
 /* Define to 1 if you have the <sys/klog.h> header file. */
 #define HAVE_SYS_KLOG_H 1
 
+/* Define to 1 if you have the <sys/lgrp_user_impl.h> header file. */
+/* #undef HAVE_SYS_LGRP_USER_IMPL_H */
+
 /* Define to 1 if you have the <sys/param.h> header file. */
 #define HAVE_SYS_PARAM_H 1
 
@@ -283,6 +292,9 @@
 
 /* Define to 1 if you have the <sys/syscall.h> header file. */
 #define HAVE_SYS_SYSCALL_H 1
+
+/* Define to 1 if you have the <sys/sysnvl.h> header file. */
+/* #undef HAVE_SYS_SYSNVL_H */
 
 /* Define to 1 if you have the <sys/time.h> header file. */
 #define HAVE_SYS_TIME_H 1
@@ -305,8 +317,8 @@
 /* Define to 1 if you have the `utimensat' function. */
 #define HAVE_UTIMENSAT 1
 
-/* configured default page size 4k */
-#define MIPS_PAGE_SHIFT 12
+/* Define to 1 if you're using Musl libc */
+/* #undef MUSL_LIBC */
 
 /* Name of package */
 #define PACKAGE "valgrind"
@@ -318,7 +330,7 @@
 #define PACKAGE_NAME "Valgrind"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "Valgrind 3.11.0"
+#define PACKAGE_STRING "Valgrind 3.13.0"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "valgrind"
@@ -327,16 +339,25 @@
 #define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "3.11.0"
+#define PACKAGE_VERSION "3.13.0"
+
+/* Define to 1 if you have the `A_GETSTAT' and `A_SETSTAT' constants. */
+/* #undef SOLARIS_AUDITON_STAT */
 
 /* Define to 1 if you have the new `execve' syscall which accepts flags. */
 /* #undef SOLARIS_EXECVE_SYSCALL_TAKES_FLAGS */
+
+/* Define to 1 if fpregset_t defines struct _fpchip_state */
+/* #undef SOLARIS_FPCHIP_STATE_TAKES_UNDERSCORE */
 
 /* Define to 1 if you have the new `frealpathat' syscall. */
 /* #undef SOLARIS_FREALPATHAT_SYSCALL */
 
 /* Define to 1 if you have the new `gethrt' fasttrap. */
 /* #undef SOLARIS_GETHRT_FASTTRAP */
+
+/* Define to 1 if you have the new `getrandom' syscall. */
+/* #undef SOLARIS_GETRANDOM_SYSCALL */
 
 /* Define to 1 if you have the new `get_zone_offset' fasttrap. */
 /* #undef SOLARIS_GETZONEOFFSET_FASTTRAP */
@@ -353,6 +374,10 @@
 /* Define to 1 if you have the new `lwp_sigqueue' syscall which accepts pid.
    */
 /* #undef SOLARIS_LWP_SIGQUEUE_SYSCALL_TAKES_PID */
+
+/* Define to 1 if you have the `MODNVL_CTRLMAP' through `MODDEVINFO_CACHE_TS'
+   constants. */
+/* #undef SOLARIS_MODCTL_MODNVL */
 
 /* Define to 1 if you have the new `accept' syscall. */
 /* #undef SOLARIS_NEW_ACCEPT_SYSCALL */
@@ -372,6 +397,13 @@
 /* Define to 1 if you have the `prxregset_t' type. */
 /* #undef SOLARIS_PRXREGSET_T */
 
+/* Define to 1 if you have the `PSET_GET_NAME' constants. */
+/* #undef SOLARIS_PSET_GET_NAME */
+
+/* Define to 1 if PT_SUNWDTRACE program header provides just an initial thread
+   pointer for libc. */
+/* #undef SOLARIS_PT_SUNDWTRACE_THRP */
+
 /* Version number of the repository door cache protocol. */
 /* #undef SOLARIS_REPCACHE_PROTOCOL_VERSION */
 
@@ -381,12 +413,18 @@
 /* Define to 1 if you have the new `sysstat_zone' segment reservation. */
 /* #undef SOLARIS_RESERVE_SYSSTAT_ZONE_ADDR */
 
+/* Define to 1 if you have the schedctl page executable. */
+/* #undef SOLARIS_SCHEDCTL_PAGE_EXEC */
+
 /* Define to 1 if you have the `IPC_XSTAT64', `SHMADV', `SHM_ADV_GET',
    `SHM_ADV_SET' and `SHMGET_OSM' constants. */
 /* #undef SOLARIS_SHM_NEW */
 
 /* Define to 1 if you have the `spawn' syscall. */
 /* #undef SOLARIS_SPAWN_SYSCALL */
+
+/* Define to 1 if you have the `system_stats' syscall. */
+/* #undef SOLARIS_SYSTEM_STATS_SYSCALL */
 
 /* Define to 1 if you have the `TNDB_GET_TNIP' constant. */
 /* #undef SOLARIS_TNDB_GET_TNIP */
@@ -415,7 +453,7 @@
 #define TIME_WITH_SYS_TIME 1
 
 /* Version number of package */
-#define VERSION "3.11.0"
+#define VERSION "3.13.0"
 
 /* Temporary files directory */
 #define VG_TMPDIR "/tmp"

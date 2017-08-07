@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2011-2015 Philippe Waroquiers
+   Copyright (C) 2011-2017 Philippe Waroquiers
 
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License as
@@ -119,6 +119,13 @@ extern Bool VG_(gdbserver_report_signal) (vki_siginfo_t *info, ThreadId tid);
 extern void VG_(gdbserver_report_fatal_signal) (const vki_siginfo_t *info,
                                                 ThreadId tid);
 
+// To be called by core before and after a client syscall.
+// If GDB has asked to observe the syscall, control will be given to GDB.
+// When Before is True, it is a report before the syscall,
+// False means a report after the syscall.
+extern void VG_(gdbserver_report_syscall) (Bool before, UWord sysno,
+                                           ThreadId tid);
+
 /* Entry point invoked by scheduler.c to execute the request 
    VALGRIND_CLIENT_MONITOR_COMMAND.
    Returns True if command was not recognised. */
@@ -223,7 +230,7 @@ typedef
    } VgdbShared64;
 
 // The below typedef makes the life of valgrind easier.
-// vgdb must however work explicitely with the specific 32 or 64 bits version.
+// vgdb must however work explicitly with the specific 32 or 64 bits version.
 
 #if VEX_HOST_WORDSIZE == 8
 typedef VgdbShared64 VgdbShared;

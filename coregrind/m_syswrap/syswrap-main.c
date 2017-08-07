@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -50,6 +50,7 @@
 #include "pub_core_machine.h"
 #include "pub_core_mallocfree.h"
 #include "pub_core_syswrap.h"
+#include "pub_core_gdbserver.h"     // VG_(gdbserver_report_syscall)
 
 #include "priv_types_n_macros.h"
 #include "priv_syswrap-main.h"
@@ -548,8 +549,9 @@ void getSyscallArgsFromGuestState ( /*OUT*/SyscallArgs*       canonical,
       canonical->arg2  = gst->guest_r5;    // a1
       canonical->arg3  = gst->guest_r6;    // a2
       canonical->arg4  = gst->guest_r7;    // a3
-      canonical->arg5  = *((UInt*) (gst->guest_r29 + 16));    // 16(guest_SP/sp)
-      canonical->arg6  = *((UInt*) (gst->guest_r29 + 20));    // 20(sp)
+      canonical->arg5  = *((UInt*) (gst->guest_r29 + 16));    // 16(guest_SP)
+      canonical->arg6  = *((UInt*) (gst->guest_r29 + 20));    // 20(guest_SP)
+      canonical->arg7  = *((UInt*) (gst->guest_r29 + 24));    // 24(guest_SP)
       canonical->arg8 = 0;
    } else {
       // Fixme hack handle syscall()
@@ -701,18 +703,6 @@ void getSyscallArgsFromGuestState ( /*OUT*/SyscallArgs*       canonical,
    canonical->arg4  = gst->guest_r5;
    canonical->arg5  = gst->guest_r6;
    canonical->arg6  = gst->guest_r7;
-   canonical->arg7  = 0;
-   canonical->arg8  = 0;
-
-#elif defined(VGP_tilegx_linux)
-   VexGuestTILEGXState* gst = (VexGuestTILEGXState*)gst_vanilla;
-   canonical->sysno = gst->guest_r10;
-   canonical->arg1  = gst->guest_r0;
-   canonical->arg2  = gst->guest_r1;
-   canonical->arg3  = gst->guest_r2;
-   canonical->arg4  = gst->guest_r3;
-   canonical->arg5  = gst->guest_r4;
-   canonical->arg6  = gst->guest_r5;
    canonical->arg7  = 0;
    canonical->arg8  = 0;
 
@@ -924,16 +914,6 @@ void putSyscallArgsIntoGuestState ( /*IN*/ SyscallArgs*       canonical,
    gst->guest_r8 = canonical->arg5;
    gst->guest_r9 = canonical->arg6;
 
-#elif defined(VGP_tilegx_linux)
-   VexGuestTILEGXState* gst = (VexGuestTILEGXState*)gst_vanilla;
-   gst->guest_r10 = canonical->sysno;
-   gst->guest_r0 = canonical->arg1;
-   gst->guest_r1 = canonical->arg2;
-   gst->guest_r2 = canonical->arg3;
-   gst->guest_r3 = canonical->arg4;
-   gst->guest_r4 = canonical->arg5;
-   gst->guest_r5 = canonical->arg6;
-
 #elif defined(VGP_x86_solaris)
    VexGuestX86State* gst = (VexGuestX86State*)gst_vanilla;
    UWord *stack = (UWord *)gst->guest_ESP;
@@ -1096,11 +1076,6 @@ void getSyscallStatusFromGuestState ( /*OUT*/SyscallStatus*     canonical,
 #  elif defined(VGP_s390x_linux)
    VexGuestS390XState* gst   = (VexGuestS390XState*)gst_vanilla;
    canonical->sres = VG_(mk_SysRes_s390x_linux)( gst->guest_r2 );
-   canonical->what = SsComplete;
-
-#  elif defined(VGP_tilegx_linux)
-   VexGuestTILEGXState* gst = (VexGuestTILEGXState*)gst_vanilla;
-   canonical->sres = VG_(mk_SysRes_tilegx_linux)( gst->guest_r0 );
    canonical->what = SsComplete;
 
 #  elif defined(VGP_x86_solaris)
@@ -1334,18 +1309,6 @@ void putSyscallStatusIntoGuestState ( /*IN*/ ThreadId tid,
    VG_TRACK( post_reg_write, Vg_CoreSysCall, tid,
              OFFSET_mips64_r7, sizeof(UWord) );
 
-#  elif defined(VGP_tilegx_linux)
-   VexGuestTILEGXState* gst = (VexGuestTILEGXState*)gst_vanilla;
-   vg_assert(canonical->what == SsComplete);
-   if (sr_isError(canonical->sres)) {
-      gst->guest_r0 = - (Long)sr_Err(canonical->sres);
-      // r1 hold errno
-      gst->guest_r1 = (Long)sr_Err(canonical->sres);
-   } else {
-      gst->guest_r0 = sr_Res(canonical->sres);
-      gst->guest_r1 = 0;
-   }
-
 #  elif defined(VGP_x86_solaris)
    VexGuestX86State* gst = (VexGuestX86State*)gst_vanilla;
    SysRes sres = canonical->sres;
@@ -1489,7 +1452,7 @@ void getSyscallArgLayout ( /*OUT*/SyscallArgLayout* layout )
    layout->o_arg4   = OFFSET_mips32_r7;
    layout->s_arg5   = sizeof(UWord) * 4;
    layout->s_arg6   = sizeof(UWord) * 5;
-   layout->uu_arg7  = -1; /* impossible value */
+   layout->s_arg7   = sizeof(UWord) * 6;
    layout->uu_arg8  = -1; /* impossible value */
 
 #elif defined(VGP_mips64_linux)
@@ -1534,17 +1497,6 @@ void getSyscallArgLayout ( /*OUT*/SyscallArgLayout* layout )
    layout->o_arg4   = OFFSET_s390x_r5;
    layout->o_arg5   = OFFSET_s390x_r6;
    layout->o_arg6   = OFFSET_s390x_r7;
-   layout->uu_arg7  = -1; /* impossible value */
-   layout->uu_arg8  = -1; /* impossible value */
-
-#elif defined(VGP_tilegx_linux)
-   layout->o_sysno  = OFFSET_tilegx_r(10);
-   layout->o_arg1   = OFFSET_tilegx_r(0);
-   layout->o_arg2   = OFFSET_tilegx_r(1);
-   layout->o_arg3   = OFFSET_tilegx_r(2);
-   layout->o_arg4   = OFFSET_tilegx_r(3);
-   layout->o_arg5   = OFFSET_tilegx_r(4);
-   layout->o_arg6   = OFFSET_tilegx_r(5);
    layout->uu_arg7  = -1; /* impossible value */
    layout->uu_arg8  = -1; /* impossible value */
 
@@ -1656,7 +1608,7 @@ static const SyscallTableEntry* get_syscall_entry ( Int syscallno )
 /* Add and remove signals from mask so that we end up telling the
    kernel the state we actually want rather than what the client
    wants. */
-static void sanitize_client_sigmask(vki_sigset_t *mask)
+void VG_(sanitize_client_sigmask)(vki_sigset_t *mask)
 {
    VG_(sigdelset)(mask, VKI_SIGKILL);
    VG_(sigdelset)(mask, VKI_SIGSTOP);
@@ -1906,6 +1858,9 @@ void VG_(client_syscall) ( ThreadId tid, UInt trc )
                   &layout, 
                   &sci->args, &sci->status, &sci->flags );
    
+   /* If needed, gdbserver will report syscall entry to GDB */
+   VG_(gdbserver_report_syscall)(True, sysno, tid);
+
    /* The pre-handler may have modified:
          sci->args
          sci->status
@@ -1975,7 +1930,7 @@ void VG_(client_syscall) ( ThreadId tid, UInt trc )
          PRINT(" --> [async] ... \n");
 
          mask = tst->sig_mask;
-         sanitize_client_sigmask(&mask);
+         VG_(sanitize_client_sigmask)(&mask);
 
          /* Gack.  More impedance matching.  Copy the possibly
             modified syscall args back into the guest state. */
@@ -2062,6 +2017,9 @@ void VG_(client_syscall) ( ThreadId tid, UInt trc )
       a platform-specific action. */
    if (!(sci->flags & SfNoWriteResult))
       putSyscallStatusIntoGuestState( tid, &sci->status, &tst->arch.vex );
+
+   /* If needed, gdbserver will report syscall return to GDB */
+   VG_(gdbserver_report_syscall)(False, sysno, tid);
 
    /* Situation now:
       - the guest state is now correctly modified following the syscall
@@ -2405,10 +2363,10 @@ void ML_(fixup_guest_state_to_restart_syscall) ( ThreadArchState* arch )
    /* Make sure our caller is actually sane, and we're really backing
       back over a syscall.
 
-      int $0x80 == CD 80
-      int $0x81 == CD 81
-      int $0x82 == CD 82
-      sysenter  == 0F 34
+      int $0x80 == CD 80  // Used to communicate with BSD syscalls
+      int $0x81 == CD 81  // Used to communicate with Mach traps
+      int $0x82 == CD 82  // Used to communicate with "thread" ?
+      sysenter  == 0F 34  // Used to communicate with Unix syscalls
    */
    {
        UChar *p = (UChar *)arch->vex.guest_EIP;
@@ -2424,8 +2382,23 @@ void ML_(fixup_guest_state_to_restart_syscall) ( ThreadArchState* arch )
    }
    
 #elif defined(VGP_amd64_darwin)
-   // DDD: #warning GrP fixme amd64 restart unimplemented
-   vg_assert(0);
+   arch->vex.guest_RIP = arch->vex.guest_IP_AT_SYSCALL;
+    
+   /* Make sure our caller is actually sane, and we're really backing
+      back over a syscall.
+
+      syscall   == 0F 05
+   */
+   {
+       UChar *p = (UChar *)arch->vex.guest_RIP;
+        
+       Bool  ok = (p[0] == 0x0F && p[1] == 0x05);
+       if (!ok)
+           VG_(message)(Vg_DebugMsg,
+                        "?! restarting over syscall at %#llx %02x %02x\n",
+                        arch->vex.guest_RIP, p[0], p[1]);
+       vg_assert(ok);
+   }
    
 #elif defined(VGP_s390x_linux)
    arch->vex.guest_IA -= 2;             // sizeof(syscall)
@@ -2475,21 +2448,6 @@ void ML_(fixup_guest_state_to_restart_syscall) ( ThreadArchState* arch )
 #     else
 #        error "Unknown endianness"
 #     endif
-   }
-#elif defined(VGP_tilegx_linux)
-   arch->vex.guest_pc -= 8;             // sizeof({ swint1 })
-
-   /* Make sure our caller is actually sane, and we're really backing
-      back over a syscall. no other instruction in same bundle.
-   */
-   {
-      unsigned long *p = (unsigned long *)arch->vex.guest_pc;
-
-      if (p[0] != 0x286b180051485000ULL )  // "swint1", little enidan only
-         VG_(message)(Vg_DebugMsg,
-                      "?! restarting over syscall at 0x%lx %lx\n",
-                      arch->vex.guest_pc, p[0]);
-      vg_assert(p[0] == 0x286b180051485000ULL);
    }
 
 #elif defined(VGP_x86_solaris)

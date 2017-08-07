@@ -8,7 +8,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2015-2015  Florian Krohm
+   Copyright (C) 2015-2017  Florian Krohm
 
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License as
@@ -250,9 +250,7 @@ dec_refcount(UInt ix)
          UInt size = get_slotsize(ix);
          /* Chain this slot in the freelist */
          put_slotindex(ix, freeslot_chain);
-         get_slotindex(ix);
          put_slotsize(ix + slotsize_size, size);
-         get_slotindex(ix);
          freeslot_chain = ix;
          --num_segnames;
          if (0) VG_(am_show_nsegments)(0, "AFTER DECREASE rc -> 0");
@@ -311,7 +309,7 @@ ML_(am_allocate_segname)(const HChar *name)
             freeslot_chain = next_freeslot;
          else
             put_slotindex(prev, next_freeslot);
-         put_refcount(ix, 1);
+         put_refcount(ix, 0);
          put_slotsize(ix, size);
          VG_(strcpy)(segnames + ix, name);
          ++num_segnames;
@@ -338,7 +336,7 @@ ML_(am_allocate_segname)(const HChar *name)
 
    /* copy it in */
    ix = segnames_used;
-   put_refcount(ix, 1);
+   put_refcount(ix, 0);
    put_slotsize(ix, len + 1);
    VG_(strcpy)(segnames + ix, name);
    segnames_used += need;

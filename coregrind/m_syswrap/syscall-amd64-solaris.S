@@ -7,7 +7,7 @@
   This file is part of Valgrind, a dynamic binary instrumentation
   framework.
 
-  Copyright (C) 2014-2015 Petr Pavlu
+  Copyright (C) 2014-2017 Petr Pavlu
      setup@dagobah.cz
 
   This program is free software; you can redistribute it and/or
@@ -28,9 +28,10 @@
   The GNU General Public License is contained in the file COPYING.
 */
 
+#include "pub_core_basics_asm.h"
+
 #if defined(VGP_amd64_solaris)
 
-#include "pub_core_basics_asm.h"
 #include "pub_core_vkiscnums_asm.h"
 #include "libvex_guest_offsets.h"
 
@@ -272,6 +273,9 @@ ML_(blksys_finished_DRET):	.quad 4b
 .previous
 
 #endif // defined(VGP_amd64_solaris)
+
+/* Let the linker know we don't need an executable stack */
+MARK_STACK_NO_EXEC
 
 /*--------------------------------------------------------------------*/
 /*--- end                                                          ---*/

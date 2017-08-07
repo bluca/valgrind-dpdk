@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -80,11 +80,13 @@ extern double VG_(strtod)  ( const HChar* str, HChar** endptr );
                              && VG_(strncmp)((s1),(s2),(n))==0) ? True : False )
 
 extern SizeT  VG_(strlen)         ( const HChar* str );
+extern SizeT  VG_(strnlen)        ( const HChar* str, SizeT n );
 extern HChar* VG_(strcat)         ( HChar* dest, const HChar* src );
 extern HChar* VG_(strncat)        ( HChar* dest, const HChar* src, SizeT n );
 extern HChar* VG_(strpbrk)        ( const HChar* s, const HChar* accpt );
 extern HChar* VG_(strcpy)         ( HChar* dest, const HChar* src );
 extern HChar* VG_(strncpy)        ( HChar* dest, const HChar* src, SizeT ndest );
+extern SizeT  VG_(strlcpy)        ( HChar* dest, const HChar* src, SizeT n );
 extern Int    VG_(strcmp)         ( const HChar* s1, const HChar* s2 );
 extern Int    VG_(strcasecmp)     ( const HChar* s1, const HChar* s2 );
 extern Int    VG_(strncmp)        ( const HChar* s1, const HChar* s2, SizeT nmax );
@@ -101,10 +103,14 @@ extern HChar* VG_(strtok_r)       (HChar* s, const HChar* delim, HChar** saveptr
 extern HChar* VG_(strtok)         (HChar* s, const HChar* delim);
 
 /* Parse a 32- or 64-bit hex number, including leading 0x, from string
-   starting at *ppc, putting result in *result, and return True.  Or
-   fail, in which case *ppc and *result are undefined, and return
-   False. */
+   starting at *ppc, putting result in *result, advance *ppc past the
+   characters used, and return True.  Or fail, in which case *ppc and
+   *result are undefined, and return False. */
 extern Bool VG_(parse_Addr) ( const HChar** ppc, Addr* result );
+
+/* Parse an unsigned 32 bit number, written using decimals only.
+   Calling conventions are the same as for VG_(parse_Addr). */
+extern Bool VG_(parse_UInt) ( const HChar** ppc, UInt* result );
 
 /* Parse an "enum set" made of one or more words comma separated.
    The allowed word values are given in 'tokens', separated by comma.

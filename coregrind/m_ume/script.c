@@ -8,7 +8,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -115,7 +115,7 @@ Int VG_(load_script)(Int fd, const HChar* name, ExeInfo* info)
          cp++;
       *cp = '\0';
    }
-   
+   VG_(free)(info->interp_name);   
    info->interp_name = VG_(strdup)("ume.ls.1", interp);
    vg_assert(NULL != info->interp_name);
    if (arg != NULL && *arg != '\0') {

@@ -7,11 +7,11 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2004-2015 OpenWorks LLP
+   Copyright (C) 2004-2017 OpenWorks LLP
       info@open-works.net
 
    NEON support is
-   Copyright (C) 2010-2015 Samsung Electronics
+   Copyright (C) 2010-2017 Samsung Electronics
    contributed by Dmitry Zhurikhin <zhur@ispras.ru>
               and Kirill Batuzov <batuzovk@ispras.ru>
 
@@ -1329,6 +1329,15 @@ ARMInstr* ARMInstr_VCvtSD ( Bool sToD, HReg dst, HReg src ) {
    i->ARMin.VCvtSD.src  = src;
    return i;
 }
+ARMInstr* ARMInstr_VXferQ ( Bool toQ, HReg qD, HReg dHi, HReg dLo ) {
+   ARMInstr* i = LibVEX_Alloc_inline(sizeof(ARMInstr));
+   i->tag              = ARMin_VXferQ;
+   i->ARMin.VXferQ.toQ = toQ;
+   i->ARMin.VXferQ.qD  = qD;
+   i->ARMin.VXferQ.dHi = dHi;
+   i->ARMin.VXferQ.dLo = dLo;
+   return i;
+}
 ARMInstr* ARMInstr_VXferD ( Bool toD, HReg dD, HReg rHi, HReg rLo ) {
    ARMInstr* i = LibVEX_Alloc_inline(sizeof(ARMInstr));
    i->tag              = ARMin_VXferD;
@@ -1354,6 +1363,27 @@ ARMInstr* ARMInstr_VCvtID ( Bool iToD, Bool syned,
    i->ARMin.VCvtID.syned = syned;
    i->ARMin.VCvtID.dst   = dst;
    i->ARMin.VCvtID.src   = src;
+   return i;
+}
+ARMInstr* ARMInstr_VRIntR ( Bool isF64, HReg dst, HReg src )
+{
+   ARMInstr* i = LibVEX_Alloc_inline(sizeof(ARMInstr));
+   i->tag                = ARMin_VRIntR;
+   i->ARMin.VRIntR.isF64 = isF64;
+   i->ARMin.VRIntR.dst   = dst ;
+   i->ARMin.VRIntR.src   = src;
+   return i;
+}
+ARMInstr* ARMInstr_VMinMaxNum ( Bool isF64, Bool isMax,
+                                HReg dst, HReg srcL, HReg srcR )
+{
+   ARMInstr* i = LibVEX_Alloc_inline(sizeof(ARMInstr));
+   i->tag = ARMin_VMinMaxNum;
+   i->ARMin.VMinMaxNum.isF64 = isF64;
+   i->ARMin.VMinMaxNum.isMax = isMax;
+   i->ARMin.VMinMaxNum.dst   = dst ;
+   i->ARMin.VMinMaxNum.srcL  = srcL;
+   i->ARMin.VMinMaxNum.srcR  = srcR;
    return i;
 }
 ARMInstr* ARMInstr_FPSCR ( Bool toFPSCR, HReg iReg ) {
@@ -1800,6 +1830,29 @@ void ppARMInstr ( const ARMInstr* i ) {
          vex_printf(", ");
          ppHRegARM(i->ARMin.VCvtSD.src);
          return;
+      case ARMin_VXferQ:
+         if (i->ARMin.VXferQ.toQ) {
+            vex_printf("vmov ");
+            ppHRegARM(i->ARMin.VXferQ.qD);
+            vex_printf("-lo64, ");
+            ppHRegARM(i->ARMin.VXferQ.dLo);
+            vex_printf(" ; vmov ");
+            ppHRegARM(i->ARMin.VXferQ.qD);
+            vex_printf("-hi64, ");
+            ppHRegARM(i->ARMin.VXferQ.dHi);
+         } else {
+            vex_printf("vmov ");
+            ppHRegARM(i->ARMin.VXferQ.dLo);
+            vex_printf(", ");
+            ppHRegARM(i->ARMin.VXferQ.qD);
+            vex_printf("-lo64");
+            vex_printf(" ; vmov ");
+            ppHRegARM(i->ARMin.VXferQ.dHi);
+            vex_printf(", ");
+            ppHRegARM(i->ARMin.VXferQ.qD);
+            vex_printf("-hi64");
+         }
+         return;
       case ARMin_VXferD:
          vex_printf("vmov  ");
          if (i->ARMin.VXferD.toD) {
@@ -1839,6 +1892,25 @@ void ppARMInstr ( const ARMInstr* i ) {
          ppHRegARM(i->ARMin.VCvtID.dst);
          vex_printf(", ");
          ppHRegARM(i->ARMin.VCvtID.src);
+         return;
+      }
+      case ARMin_VRIntR: {
+         const HChar* sz = i->ARMin.VRIntR.isF64 ? "f64" : "f32";
+         vex_printf("vrintr.%s.%s ", sz, sz);
+         ppHRegARM(i->ARMin.VRIntR.dst);
+         vex_printf(", ");
+         ppHRegARM(i->ARMin.VRIntR.src);
+         return;
+      }
+      case ARMin_VMinMaxNum: {
+         const HChar* sz = i->ARMin.VMinMaxNum.isF64 ? "f64" : "f32";
+         const HChar* nm = i->ARMin.VMinMaxNum.isMax ? "vmaxnm" : "vminnm";
+         vex_printf("%s.%s ", nm, sz);
+         ppHRegARM(i->ARMin.VMinMaxNum.dst);
+         vex_printf(", ");
+         ppHRegARM(i->ARMin.VMinMaxNum.srcL);
+         vex_printf(", ");
+         ppHRegARM(i->ARMin.VMinMaxNum.srcR);
          return;
       }
       case ARMin_FPSCR:
@@ -2201,6 +2273,17 @@ void getRegUsage_ARMInstr ( HRegUsage* u, const ARMInstr* i, Bool mode64 )
          addHRegUse(u, HRmWrite, i->ARMin.VCvtSD.dst);
          addHRegUse(u, HRmRead,  i->ARMin.VCvtSD.src);
          return;
+      case ARMin_VXferQ:
+         if (i->ARMin.VXferQ.toQ) {
+            addHRegUse(u, HRmWrite, i->ARMin.VXferQ.qD);
+            addHRegUse(u, HRmRead,  i->ARMin.VXferQ.dHi);
+            addHRegUse(u, HRmRead,  i->ARMin.VXferQ.dLo);
+         } else {
+            addHRegUse(u, HRmRead,  i->ARMin.VXferQ.qD);
+            addHRegUse(u, HRmWrite, i->ARMin.VXferQ.dHi);
+            addHRegUse(u, HRmWrite, i->ARMin.VXferQ.dLo);
+         }
+         return;
       case ARMin_VXferD:
          if (i->ARMin.VXferD.toD) {
             addHRegUse(u, HRmWrite, i->ARMin.VXferD.dD);
@@ -2224,6 +2307,15 @@ void getRegUsage_ARMInstr ( HRegUsage* u, const ARMInstr* i, Bool mode64 )
       case ARMin_VCvtID:
          addHRegUse(u, HRmWrite, i->ARMin.VCvtID.dst);
          addHRegUse(u, HRmRead,  i->ARMin.VCvtID.src);
+         return;
+      case ARMin_VRIntR:
+         addHRegUse(u, HRmWrite, i->ARMin.VRIntR.dst);
+         addHRegUse(u, HRmRead,  i->ARMin.VRIntR.src);
+         return;
+      case ARMin_VMinMaxNum:
+         addHRegUse(u, HRmWrite, i->ARMin.VMinMaxNum.dst);
+         addHRegUse(u, HRmRead,  i->ARMin.VMinMaxNum.srcL);
+         addHRegUse(u, HRmRead,  i->ARMin.VMinMaxNum.srcR);
          return;
       case ARMin_FPSCR:
          if (i->ARMin.FPSCR.toFPSCR)
@@ -2422,6 +2514,11 @@ void mapRegs_ARMInstr ( HRegRemap* m, ARMInstr* i, Bool mode64 )
          i->ARMin.VCvtSD.dst = lookupHRegRemap(m, i->ARMin.VCvtSD.dst);
          i->ARMin.VCvtSD.src = lookupHRegRemap(m, i->ARMin.VCvtSD.src);
          return;
+      case ARMin_VXferQ:
+         i->ARMin.VXferQ.qD  = lookupHRegRemap(m, i->ARMin.VXferQ.qD);
+         i->ARMin.VXferQ.dHi = lookupHRegRemap(m, i->ARMin.VXferQ.dHi);
+         i->ARMin.VXferQ.dLo = lookupHRegRemap(m, i->ARMin.VXferQ.dLo);
+         return;
       case ARMin_VXferD:
          i->ARMin.VXferD.dD  = lookupHRegRemap(m, i->ARMin.VXferD.dD);
          i->ARMin.VXferD.rHi = lookupHRegRemap(m, i->ARMin.VXferD.rHi);
@@ -2434,6 +2531,18 @@ void mapRegs_ARMInstr ( HRegRemap* m, ARMInstr* i, Bool mode64 )
       case ARMin_VCvtID:
          i->ARMin.VCvtID.dst = lookupHRegRemap(m, i->ARMin.VCvtID.dst);
          i->ARMin.VCvtID.src = lookupHRegRemap(m, i->ARMin.VCvtID.src);
+         return;
+      case ARMin_VRIntR:
+         i->ARMin.VRIntR.dst = lookupHRegRemap(m, i->ARMin.VRIntR.dst);
+         i->ARMin.VRIntR.src = lookupHRegRemap(m, i->ARMin.VRIntR.src);
+         return;
+      case ARMin_VMinMaxNum:
+         i->ARMin.VMinMaxNum.dst
+            = lookupHRegRemap(m, i->ARMin.VMinMaxNum.dst);
+         i->ARMin.VMinMaxNum.srcL
+            = lookupHRegRemap(m, i->ARMin.VMinMaxNum.srcL);
+         i->ARMin.VMinMaxNum.srcR
+            = lookupHRegRemap(m, i->ARMin.VMinMaxNum.srcR);
          return;
       case ARMin_FPSCR:
          i->ARMin.FPSCR.iReg = lookupHRegRemap(m, i->ARMin.FPSCR.iReg);
@@ -2728,33 +2837,38 @@ static inline UInt qregEnc ( HReg r )
 #define X1111  BITS4(1,1,1,1)
 
 #define XXXXX___(zzx7,zzx6,zzx5,zzx4,zzx3) \
-   ((((zzx7) & 0xF) << 28) | (((zzx6) & 0xF) << 24) |  \
+   (((((UInt)(zzx7)) & 0xF) << 28) | \
+    (((zzx6) & 0xF) << 24) |  \
     (((zzx5) & 0xF) << 20) | (((zzx4) & 0xF) << 16) |  \
     (((zzx3) & 0xF) << 12))
 
 #define XXXXXX__(zzx7,zzx6,zzx5,zzx4,zzx3,zzx2)        \
-   ((((zzx7) & 0xF) << 28) | (((zzx6) & 0xF) << 24) |  \
+   (((((UInt)(zzx7)) & 0xF) << 28) | \
+    (((zzx6) & 0xF) << 24) |  \
     (((zzx5) & 0xF) << 20) | (((zzx4) & 0xF) << 16) |  \
     (((zzx3) & 0xF) << 12) | (((zzx2) & 0xF) <<  8))
 
 #define XXXXX__X(zzx7,zzx6,zzx5,zzx4,zzx3,zzx0)        \
-   ((((zzx7) & 0xF) << 28) | (((zzx6) & 0xF) << 24) |  \
+   (((((UInt)(zzx7)) & 0xF) << 28) | \
+    (((zzx6) & 0xF) << 24) |  \
     (((zzx5) & 0xF) << 20) | (((zzx4) & 0xF) << 16) |  \
     (((zzx3) & 0xF) << 12) | (((zzx0) & 0xF) <<  0))
 
 #define XXX___XX(zzx7,zzx6,zzx5,zzx1,zzx0) \
-  ((((zzx7) & 0xF) << 28) | (((zzx6) & 0xF) << 24) | \
+  (((((UInt)(zzx7)) & 0xF) << 28) | \
+   (((zzx6) & 0xF) << 24) | \
    (((zzx5) & 0xF) << 20) | (((zzx1) & 0xF) << 4) | \
    (((zzx0) & 0xF) << 0))
 
 #define XXXXXXXX(zzx7,zzx6,zzx5,zzx4,zzx3,zzx2,zzx1,zzx0)  \
-   ((((zzx7) & 0xF) << 28) | (((zzx6) & 0xF) << 24) |  \
+   (((((UInt)(zzx7)) & 0xF) << 28) | \
+    (((zzx6) & 0xF) << 24) |  \
     (((zzx5) & 0xF) << 20) | (((zzx4) & 0xF) << 16) |  \
     (((zzx3) & 0xF) << 12) | (((zzx2) & 0xF) <<  8) |  \
     (((zzx1) & 0xF) <<  4) | (((zzx0) & 0xF) <<  0))
 
 #define XX______(zzx7,zzx6) \
-   ((((zzx7) & 0xF) << 28) | (((zzx6) & 0xF) << 24))
+   (((((UInt)(zzx7)) & 0xF) << 28) | (((zzx6) & 0xF) << 24))
 
 /* Generate a skeletal insn that involves an a RI84 shifter operand.
    Returns a word which is all zeroes apart from bits 25 and 11..0,
@@ -3682,6 +3796,46 @@ Int emit_ARMInstr ( /*MB_MOD*/Bool* is_profInc,
             goto done;
          }
       }
+      case ARMin_VXferQ: {
+         UInt insn;
+         UInt qD  = qregEnc(i->ARMin.VXferQ.qD);
+         UInt dHi = dregEnc(i->ARMin.VXferQ.dHi);
+         UInt dLo = dregEnc(i->ARMin.VXferQ.dLo);
+         /* This is a bit tricky.  We need to make 2 D-D moves and we rely
+            on the fact that the Q register can be treated as two D registers.
+            We also rely on the fact that the register allocator will allocate
+            the two D's and the Q to disjoint parts of the register file,
+            and so we don't have to worry about the first move's destination
+            being the same as the second move's source, etc.  We do have
+            assertions though. */
+         /* The ARM ARM specifies that
+              D<2n>   maps to the least significant half of Q<n>
+              D<2n+1> maps to the most  significant half of Q<n>
+            So there are no issues with endianness here.
+         */
+         UInt qDlo = 2 * qD + 0;
+         UInt qDhi = 2 * qD + 1;
+         /* Stay sane .. */
+         vassert(qDhi != dHi && qDhi != dLo);
+         vassert(qDlo != dHi && qDlo != dLo);
+         /* vmov dX, dY is
+            F 2 (0,dX[4],1,0) dY[3:0] dX[3:0] 1 (dY[4],0,dY[4],1) dY[3:0]
+         */
+#        define VMOV_D_D(_xx,_yy) \
+            XXXXXXXX( 0xF, 0x2, BITS4(0, (((_xx) >> 4) & 1), 1, 0), \
+                      ((_yy) & 0xF), ((_xx) & 0xF), 0x1, \
+                      BITS4( (((_yy) >> 4) & 1), 0, (((_yy) >> 4) & 1), 1), \
+                      ((_yy) & 0xF) )
+         if (i->ARMin.VXferQ.toQ) {
+            insn = VMOV_D_D(qDlo, dLo); *p++ = insn;
+            insn = VMOV_D_D(qDhi, dHi); *p++ = insn;
+         } else {
+            insn = VMOV_D_D(dLo, qDlo); *p++ = insn;
+            insn = VMOV_D_D(dHi, qDhi); *p++ = insn;
+         }
+#        undef VMOV_D_D
+         goto done;
+      }
       case ARMin_VXferD: {
          UInt dD  = dregEnc(i->ARMin.VXferD.dD);
          UInt rHi = iregEnc(i->ARMin.VXferD.rHi);
@@ -3758,6 +3912,61 @@ Int emit_ARMInstr ( /*MB_MOD*/Bool* is_profInc,
          }
          /*UNREACHED*/
          vassert(0);
+      }
+      case ARMin_VRIntR: { /* NB: ARM v8 and above only */
+         Bool isF64 = i->ARMin.VRIntR.isF64;
+         UInt rDst  = (isF64 ? dregEnc : fregEnc)(i->ARMin.VRIntR.dst);
+         UInt rSrc  = (isF64 ? dregEnc : fregEnc)(i->ARMin.VRIntR.src);
+         /* The encoding of registers here differs strangely for the
+            F32 and F64 cases. */
+         UInt D, Vd, M, Vm;
+         if (isF64) {
+            D  = (rDst >> 4) & 1;
+            Vd = rDst & 0xF;
+            M  = (rSrc >> 4) & 1;
+            Vm = rSrc & 0xF;
+         } else {
+            Vd = (rDst >> 1) & 0xF;
+            D  = rDst & 1;
+            Vm = (rSrc >> 1) & 0xF;
+            M  = rSrc & 1;
+         }
+         vassert(D <= 1 && Vd <= 15 && M <= 1 && Vm <= 15);
+         *p++ = XXXXXXXX(0xE, X1110, X1011 | (D << 2), X0110, Vd,
+                         isF64 ? X1011 : X1010, X0100 | (M << 1), Vm);
+         goto done;
+      }
+      case ARMin_VMinMaxNum: {
+         Bool isF64 = i->ARMin.VMinMaxNum.isF64;
+         Bool isMax = i->ARMin.VMinMaxNum.isMax;
+         UInt rDst  = (isF64 ? dregEnc : fregEnc)(i->ARMin.VMinMaxNum.dst);
+         UInt rSrcL = (isF64 ? dregEnc : fregEnc)(i->ARMin.VMinMaxNum.srcL);
+         UInt rSrcR = (isF64 ? dregEnc : fregEnc)(i->ARMin.VMinMaxNum.srcR);
+         /* The encoding of registers here differs strangely for the
+            F32 and F64 cases. */
+         UInt D, Vd, N, Vn, M, Vm;
+         if (isF64) {
+            D  = (rDst >> 4) & 1;
+            Vd = rDst & 0xF;
+            N  = (rSrcL >> 4) & 1;
+            Vn = rSrcL & 0xF;
+            M  = (rSrcR >> 4) & 1;
+            Vm = rSrcR & 0xF;
+         } else {
+            Vd = (rDst >> 1) & 0xF;
+            D  = rDst & 1;
+            Vn = (rSrcL >> 1) & 0xF;
+            N  = rSrcL & 1;
+            Vm = (rSrcR >> 1) & 0xF;
+            M  = rSrcR & 1;
+         }
+         vassert(D <= 1 && Vd <= 15 && M <= 1 && Vm <= 15 && N <= 1
+                 && Vn <= 15);
+         *p++ = XXXXXXXX(X1111,X1110, X1000 | (D << 2), Vn, Vd,
+                         X1010 | (isF64 ? 1 : 0), 
+                         (N << 3) | ((isMax ? 0 : 1) << 2) | (M << 1) | 0,
+                         Vm);
+         goto done;
       }
       case ARMin_FPSCR: {
          Bool toFPSCR = i->ARMin.FPSCR.toFPSCR;
@@ -4750,8 +4959,11 @@ VexInvalRange chainXDirect_ARM ( VexEndness endness_host,
 
    /* And make the modifications. */
    if (shortOK) {
-      Int simm24 = (Int)(delta >> 2);
-      vassert(simm24 == ((simm24 << 8) >> 8));
+      UInt uimm24      = (UInt)(delta >> 2);
+      UInt uimm24_shl8 = uimm24 << 8;
+      Int  simm24      = (Int)uimm24_shl8;
+      simm24 >>= 8;
+      vassert(uimm24 == simm24);
       p[0] = 0xEA000000 | (simm24 & 0x00FFFFFF);
       p[1] = 0xFF000000;
       p[2] = 0xFF000000;

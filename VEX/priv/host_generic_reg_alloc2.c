@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2004-2015 OpenWorks LLP
+   Copyright (C) 2004-2017 OpenWorks LLP
       info@open-works.net
 
    This program is free software; you can redistribute it and/or
@@ -993,13 +993,13 @@ HInstrArray* doRegisterAllocation (
       /* ------------ Sanity checks ------------ */
 
       /* Sanity checks are expensive.  So they are done only once
-         every 13 instructions, and just before the last
+         every 17 instructions, and just before the last
          instruction. */
       do_sanity_check
          = toBool(
               False /* Set to True for sanity checking of all insns. */
               || ii == instrs_in->arr_used-1
-              || (ii > 0 && (ii % 13) == 0)
+              || (ii > 0 && (ii % 17) == 0)
            );
 
       if (do_sanity_check) {

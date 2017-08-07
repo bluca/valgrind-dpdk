@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward
+   Copyright (C) 2000-2017 Julian Seward
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -104,7 +104,8 @@ extern const HChar* VG_(dirname) ( const HChar* path );
 extern const HChar* VG_(tmpdir)(void);
 
 /* Return the working directory at startup. The returned string is
-   persistent. */
+   persistent. Might be NULL if the current working directory doesn't
+   exist. */
 extern const HChar *VG_(get_startup_wd) ( void );
 
 #endif   // __PUB_TOOL_LIBCFILE_H

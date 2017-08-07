@@ -7,7 +7,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -66,15 +66,16 @@
    of up to _nframes.  The merge is done during stack unwinding
    (i.e. in platform specific unwinders) to collect as many
    "interesting" stack traces as possible. */
-#define RECURSIVE_MERGE(_nframes,_ips,_i){                      \
-   Int dist;                                                    \
-   for (dist = 1; dist <= _nframes && dist < (Int)_i; dist++) { \
-      if (_ips[_i-1] == _ips[_i-1-dist]) {                      \
-         _i = _i - dist;                                        \
-         break;                                                 \
-      }                                                         \
-   }                                                            \
-}
+#define RECURSIVE_MERGE(_nframes,_ips,_i) if (UNLIKELY(_nframes > 0)) \
+do {                                                                  \
+   Int dist;                                                          \
+   for (dist = 1; dist <= _nframes && dist < (Int)_i; dist++) {       \
+      if (_ips[_i-1] == _ips[_i-1-dist]) {                            \
+         _i = _i - dist;                                              \
+         break;                                                       \
+      }                                                               \
+   }                                                                  \
+} while (0)
 
 /* Note about calculation of fp_min : fp_min is the lowest address
    which can be accessed during unwinding. This is SP - VG_STACK_REDZONE_SZB.
@@ -349,6 +350,8 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
           uregs.xbp <= fp_max - 1 * sizeof(UWord)/*see comment below*/ &&
           VG_IS_4_ALIGNED(uregs.xbp))
       {
+         Addr old_xsp;
+
          /* fp looks sane, so use it. */
          uregs.xip = (((UWord*)uregs.xbp)[1]);
          // We stop if we hit a zero (the traditional end-of-stack
@@ -381,6 +384,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             }
          }
 
+         old_xsp = uregs.xsp;
          uregs.xsp = uregs.xbp + sizeof(Addr) /*saved %ebp*/ 
                                + sizeof(Addr) /*ra*/;
          uregs.xbp = (((UWord*)uregs.xbp)[0]);
@@ -392,6 +396,12 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
                if (debug) VG_(printf)("     cache FPUNWIND >2\n");
                if (debug) unwind_case = "FO";
                if (do_stats) stats.FO++;
+               if (old_xsp >= uregs.xsp) {
+                  if (debug)
+                    VG_(printf) ("     FO end of stack old_xsp %p >= xsp %p\n",
+                                 (void*)old_xsp, (void*)uregs.xsp);
+                  break;
+               }
             } else {
                fp_CF_verif_cache [hash] = xip_verified ^ CFUNWIND;
                if (debug) VG_(printf)("     cache CFUNWIND >2\n");
@@ -405,6 +415,12 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
          } else {
             if (debug) unwind_case = "FF";
             if (do_stats) stats.FF++;
+            if (old_xsp >= uregs.xsp) {
+               if (debug)
+                  VG_(printf) ("     FF end of stack old_xsp %p >= xsp %p\n",
+                               (void*)old_xsp, (void*)uregs.xsp);
+               break;
+            }
          }
          goto unwind_done;
       } else {
@@ -451,7 +467,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
          VG_(printf)("     ips%s[%d]=0x%08lx\n", unwind_case, i-1, ips[i-1]);
       uregs.xip = uregs.xip - 1;
       /* as per comment at the head of this loop */
-      if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+      RECURSIVE_MERGE(cmrf,ips,i);
    }
 
    if (do_stats) stats.nf += i;
@@ -591,9 +607,12 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
     * next function which is completely wrong.
     */
    while (True) {
+      Addr old_xsp;
 
       if (i >= max_n_ips)
          break;
+
+      old_xsp = uregs.xsp;
 
       /* Try to derive a new (ip,sp,fp) triple from the current set. */
 
@@ -601,6 +620,12 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
          be used. */
       if ( VG_(use_CF_info)( &uregs, fp_min, fp_max ) ) {
          if (0 == uregs.xip || 1 == uregs.xip) break;
+         if (old_xsp >= uregs.xsp) {
+            if (debug)
+               VG_(printf) ("     CF end of stack old_xsp %p >= xsp %p\n",
+                            (void*)old_xsp, (void*)uregs.xsp);
+            break;
+         }
          if (sps) sps[i] = uregs.xsp;
          if (fps) fps[i] = uregs.xbp;
          ips[i++] = uregs.xip - 1; /* -1: refer to calling insn, not the RA */
@@ -608,7 +633,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             VG_(printf)("     ipsC[%d]=%#08lx rbp %#08lx rsp %#08lx\n",
                         i-1, ips[i-1], uregs.xbp, uregs.xsp);
          uregs.xip = uregs.xip - 1; /* as per comment at the head of this loop */
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
 
@@ -630,6 +655,12 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
          if (0 == uregs.xip || 1 == uregs.xip) break;
          uregs.xsp = uregs.xbp + sizeof(Addr) /*saved %rbp*/ 
                                + sizeof(Addr) /*ra*/;
+         if (old_xsp >= uregs.xsp) {
+            if (debug)
+               VG_(printf) ("     FF end of stack old_xsp %p >= xsp %p\n",
+                            (void*)old_xsp, (void*)uregs.xsp);
+            break;
+         }
          uregs.xbp = (((UWord*)uregs.xbp)[0]);
          if (sps) sps[i] = uregs.xsp;
          if (fps) fps[i] = uregs.xbp;
@@ -638,7 +669,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             VG_(printf)("     ipsF[%d]=%#08lx rbp %#08lx rsp %#08lx\n",
                         i-1, ips[i-1], uregs.xbp, uregs.xsp);
          uregs.xip = uregs.xip - 1; /* as per comment at the head of this loop */
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
 
@@ -668,7 +699,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             VG_(printf)("     ipsH[%d]=%#08lx\n", i-1, ips[i-1]);
          uregs.xip = uregs.xip - 1; /* as per comment at the head of this loop */
          uregs.xsp += 8;
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
 
@@ -858,7 +889,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             ip = ip - 1; /* ip is probably dead at this point, but
                             play safe, a la x86/amd64 above.  See
                             extensive comments above. */
-            if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+            RECURSIVE_MERGE(cmrf,ips,i);
             continue;
          }
 
@@ -1042,7 +1073,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             VG_(printf)("USING CFI: r15: 0x%lx, r13: 0x%lx\n",
                         uregs.r15, uregs.r13);
          uregs.r15 = (uregs.r15 & 0xFFFFFFFE) - 1;
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
 
@@ -1070,7 +1101,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             if (sps) sps[i] = 0;
             if (fps) fps[i] = 0;
             ips[i++] = cand;
-            if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+            RECURSIVE_MERGE(cmrf,ips,i);
             nByStackScan++;
          }
       }
@@ -1087,7 +1118,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
                if (sps) sps[i] = 0;
                if (fps) fps[i] = 0;
                ips[i++] = cand;
-               if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+               RECURSIVE_MERGE(cmrf,ips,i);
                if (++nByStackScan >= VG_(clo_unw_stack_scan_frames)) break;
             }
          }
@@ -1183,7 +1214,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             VG_(printf)("USING CFI: pc: 0x%lx, sp: 0x%lx\n",
                         uregs.pc, uregs.sp);
          uregs.pc = uregs.pc - 1;
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
 
@@ -1251,7 +1282,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
          if (fps) fps[i] = uregs.fp;
          ips[i++] = uregs.ia - 1;
          uregs.ia = uregs.ia - 1;
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
       /* A problem on the first frame? Lets assume it was a bad jump.
@@ -1268,7 +1299,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
          }
          uregs.ia = uregs.lr - 1;
          ips[i++] = uregs.lr - 1;
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
 
@@ -1351,7 +1382,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
             if (fps) fps[i] = uregs.fp;
             ips[i++] = uregs.pc - 4;
             uregs.pc = uregs.pc - 4;
-            if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+            RECURSIVE_MERGE(cmrf,ips,i);
             continue;
          } else
             uregs = uregs_copy;
@@ -1408,7 +1439,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
          if (0 == uregs.ra || 1 == uregs.ra) break;
          uregs.pc = uregs.ra - 8;
          ips[i++] = uregs.ra - 8;
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
 
@@ -1424,7 +1455,7 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
          if (0 == uregs.ra || 1 == uregs.ra) break;
          uregs.pc = uregs.ra - 8;
          ips[i++] = uregs.ra - 8;
-         if (UNLIKELY(cmrf > 0)) {RECURSIVE_MERGE(cmrf,ips,i);};
+         RECURSIVE_MERGE(cmrf,ips,i);
          continue;
       }
       /* No luck.  We have to give up. */
@@ -1435,214 +1466,6 @@ UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
    return n_found;
 }
 
-#endif
-
-/* ------------------------ tilegx ------------------------- */
-#if defined(VGP_tilegx_linux)
-UInt VG_(get_StackTrace_wrk) ( ThreadId tid_if_known,
-                               /*OUT*/Addr* ips, UInt max_n_ips,
-                               /*OUT*/Addr* sps, /*OUT*/Addr* fps,
-                               const UnwindStartRegs* startRegs,
-                               Addr fp_max_orig )
-{
-   Bool  debug = False;
-   Int   i;
-   Addr  fp_max;
-   UInt  n_found = 0;
-   const Int cmrf = VG_(clo_merge_recursive_frames);
-
-   vg_assert(sizeof(Addr) == sizeof(UWord));
-   vg_assert(sizeof(Addr) == sizeof(void*));
-
-   D3UnwindRegs uregs;
-   uregs.pc = startRegs->r_pc;
-   uregs.sp = startRegs->r_sp;
-   Addr fp_min = uregs.sp - VG_STACK_REDZONE_SZB;
-
-   uregs.fp = startRegs->misc.TILEGX.r52;
-   uregs.lr = startRegs->misc.TILEGX.r55;
-
-   fp_max = VG_PGROUNDUP(fp_max_orig);
-   if (fp_max >= sizeof(Addr))
-      fp_max -= sizeof(Addr);
-
-   if (debug)
-      VG_(printf)("max_n_ips=%u fp_min=0x%lx fp_max_orig=0x%lx, "
-                  "fp_max=0x%lx pc=0x%lx sp=0x%lx fp=0x%lx\n",
-                  max_n_ips, fp_min, fp_max_orig, fp_max,
-                  uregs.pc, uregs.sp, uregs.fp);
-
-   if (sps) sps[0] = uregs.sp;
-   if (fps) fps[0] = uregs.fp;
-   ips[0] = uregs.pc;
-   i = 1;
-
-   /* Loop unwinding the stack. */
-   while (True) {
-      if (debug) {
-         VG_(printf)("i: %d, pc: 0x%lx, sp: 0x%lx, lr: 0x%lx\n",
-                     i, uregs.pc, uregs.sp, uregs.lr);
-     }
-     if (i >= max_n_ips)
-        break;
-
-     D3UnwindRegs uregs_copy = uregs;
-     if (VG_(use_CF_info)( &uregs, fp_min, fp_max )) {
-        if (debug)
-           VG_(printf)("USING CFI: pc: 0x%lx, sp: 0x%lx, fp: 0x%lx, lr: 0x%lx\n",
-                       uregs.pc, uregs.sp, uregs.fp, uregs.lr);
-        if (0 != uregs.pc && 1 != uregs.pc &&
-            (uregs.pc < fp_min || uregs.pc > fp_max)) {
-           if (sps) sps[i] = uregs.sp;
-           if (fps) fps[i] = uregs.fp;
-           if (uregs.pc != uregs_copy.pc && uregs.sp != uregs_copy.sp)
-              ips[i++] = uregs.pc - 8;
-           uregs.pc = uregs.pc - 8;
-           if (UNLIKELY(cmrf > 0)) { RECURSIVE_MERGE(cmrf,ips,i); };
-           continue;
-        } else
-           uregs = uregs_copy;
-     }
-
-     Long frame_offset = 0;
-     PtrdiffT offset;
-     if (VG_(get_inst_offset_in_function)(uregs.pc, &offset)) {
-        Addr start_pc = uregs.pc;
-        Addr limit_pc = uregs.pc - offset;
-        Addr cur_pc;
-        /* Try to find any stack adjustment from current instruction
-           bundles downward. */
-        for (cur_pc = start_pc; cur_pc > limit_pc; cur_pc -= 8) {
-           ULong inst;
-           Long off = 0;
-           ULong* cur_inst;
-           /* Fetch the instruction.   */
-           cur_inst = (ULong *)cur_pc;
-           inst = *cur_inst;
-           if(debug)
-              VG_(printf)("cur_pc: 0x%lx, inst: 0x%lx\n", cur_pc, inst);
-
-           if ((inst & 0xC000000000000000ULL) == 0) {
-              /* Bundle is X type. */
-             if ((inst & 0xC000000070000fffULL) ==
-                 (0x0000000010000db6ULL)) {
-                /* addli at X0 */
-                off = (short)(0xFFFF & (inst >> 12));
-             } else if ((inst & 0xF80007ff80000000ULL) ==
-                        (0x000006db00000000ULL)) {
-                /* addli at X1 addli*/
-                off = (short)(0xFFFF & (inst >> 43));
-             } else if ((inst & 0xC00000007FF00FFFULL) ==
-                        (0x0000000040100db6ULL)) {
-                /* addi at X0 */
-                off = (char)(0xFF & (inst >> 12));
-             } else if ((inst & 0xFFF807ff80000000ULL) ==
-                        (0x180806db00000000ULL)) {
-                /* addi at X1 */
-                off = (char)(0xFF & (inst >> 43));
-             }
-           } else {
-              /* Bundle is Y type. */
-              if ((inst & 0x0000000078000FFFULL) ==
-                  (0x0000000000000db6ULL)) {
-                 /* addi at Y0 */
-                 off = (char)(0xFF & (inst >> 12));
-              } else if ((inst & 0x3C0007FF80000000ULL) ==
-                         (0x040006db00000000ULL)) {
-                 /* addi at Y1 */
-                 off = (char)(0xFF & (inst >> 43));
-              }
-           }
-
-           if(debug && off)
-              VG_(printf)("offset: -0x%lx\n", -off);
-
-           if (off < 0) {
-              /* frame offset should be modular of 8 */
-              vg_assert((off & 7) == 0);
-              frame_offset += off;
-           } else if (off > 0)
-              /* Exit loop if a positive stack adjustment is found, which
-                 usually means that the stack cleanup code in the function
-                 epilogue is reached.  */
-             break;
-        }
-     }
-
-     if (frame_offset < 0) {
-        if (0 == uregs.pc || 1 == uregs.pc) break;
-
-        /* Subtract the offset from the current stack. */
-        uregs.sp = uregs.sp + (ULong)(-frame_offset);
-
-        if (debug)
-           VG_(printf)("offset: i: %d, pc: 0x%lx, sp: 0x%lx, lr: 0x%lx\n",
-                       i, uregs.pc, uregs.sp, uregs.lr);
-
-        if (uregs.pc == uregs.lr - 8 ||
-            uregs.lr - 8 >= fp_min && uregs.lr - 8 <= fp_max) {
-           if (debug)
-              VG_(printf)("new lr = 0x%lx\n", *(ULong*)uregs.sp);
-           uregs.lr = *(ULong*)uregs.sp;
-        }
-
-        uregs.pc = uregs.lr - 8;
-
-        if (uregs.lr != 0) {
-           /* Avoid the invalid pc = 0xffff...ff8 */
-           if (sps)
-              sps[i] = uregs.sp;
-
-           if (fps)
-              fps[i] = fps[0];
-
-           ips[i++] = uregs.pc;
-
-           if (UNLIKELY(cmrf > 0)) { RECURSIVE_MERGE(cmrf,ips,i); };
-        }
-        continue;
-     }
-
-     /* A special case for the 1st frame. Assume it was a bad jump.
-        Use the link register "lr" and current stack and frame to
-        try again. */
-     if (i == 1) {
-        if (sps) {
-           sps[1] = sps[0];
-           uregs.sp = sps[0];
-        }
-        if (fps) {
-           fps[1] = fps[0];
-           uregs.fp = fps[0];
-        }
-        if (0 == uregs.lr || 1 == uregs.lr)
-           break;
-
-        uregs.pc = uregs.lr - 8;
-        ips[i++] = uregs.lr - 8;
-        if (UNLIKELY(cmrf > 0)) { RECURSIVE_MERGE(cmrf,ips,i); };
-        continue;
-     }
-     /* No luck.  We have to give up. */
-     break;
-   }
-
-   if (debug) {
-      /* Display the back trace. */
-      Int ii ;
-      for ( ii = 0; ii < i; ii++) {
-         if (sps) {
-            VG_(printf)("%d: pc=%lx  ", ii, ips[ii]);
-            VG_(printf)("sp=%lx\n", sps[ii]);
-         } else {
-            VG_(printf)("%d: pc=%lx\n", ii, ips[ii]);
-         }
-      }
-   }
-
-   n_found = i;
-   return n_found;
-}
 #endif
 
 /*------------------------------------------------------------*/
@@ -1766,28 +1589,25 @@ void VG_(apply_StackTrace)(
         StackTrace ips, UInt n_ips
      )
 {
-   Bool main_done = False;
-   Int i = 0;
+   Int i;
 
    vg_assert(n_ips > 0);
-   do {
-      Addr ip = ips[i];
-
-      // Stop after the first appearance of "main" or one of the other names
-      // (the appearance of which is a pretty good sign that we've gone past
-      // main without seeing it, for whatever reason)
-      if ( ! VG_(clo_show_below_main) ) {
-         Vg_FnNameKind kind = VG_(get_fnname_kind_from_IP)(ip);
-         if (Vg_FnNameMain == kind || Vg_FnNameBelowMain == kind) {
-            main_done = True;
-         }
+   if ( ! VG_(clo_show_below_main) ) {
+      // Search (from the outer frame onwards) the appearance of "main"
+      // or the last appearance of a below main function.
+      // Then decrease n_ips so as to not call action for the below main
+      for (i = n_ips - 1; i >= 0; i--) {
+         Vg_FnNameKind kind = VG_(get_fnname_kind_from_IP)(ips[i]);
+         if (Vg_FnNameMain == kind || Vg_FnNameBelowMain == kind)
+            n_ips = i + 1;
+         if (Vg_FnNameMain == kind)
+            break;
       }
+   }
 
+   for (i = 0; i < n_ips; i++)
       // Act on the ip
-      action(i, ip, opaque);
-
-      i++;
-   } while (i < n_ips && !main_done);
+      action(i, ips[i], opaque);
 }
 
 

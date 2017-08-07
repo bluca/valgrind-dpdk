@@ -8,7 +8,7 @@
    This file is part of Valgrind, a dynamic binary instrumentation
    framework.
 
-   Copyright (C) 2000-2015 Julian Seward 
+   Copyright (C) 2000-2017 Julian Seward 
       jseward@acm.org
 
    This program is free software; you can redistribute it and/or
@@ -566,21 +566,6 @@ typedef struct SigQueue {
         (srP)->misc.MIPS64.r28 = (uc)->uc_mcontext.sc_regs[28]; \
       }
 
-#elif defined(VGP_tilegx_linux)
-#  define VG_UCONTEXT_INSTR_PTR(uc)       ((uc)->uc_mcontext.pc)
-#  define VG_UCONTEXT_STACK_PTR(uc)       ((uc)->uc_mcontext.sp)
-#  define VG_UCONTEXT_FRAME_PTR(uc)       ((uc)->uc_mcontext.gregs[52])
-#  define VG_UCONTEXT_SYSCALL_NUM(uc)     ((uc)->uc_mcontext.gregs[10])
-#  define VG_UCONTEXT_SYSCALL_SYSRES(uc)                            \
-      /* Convert the value in uc_mcontext.rax into a SysRes. */     \
-      VG_(mk_SysRes_tilegx_linux)((uc)->uc_mcontext.gregs[0])
-#  define VG_UCONTEXT_TO_UnwindStartRegs(srP, uc)              \
-      { (srP)->r_pc = (uc)->uc_mcontext.pc;                    \
-        (srP)->r_sp = (uc)->uc_mcontext.sp;                    \
-        (srP)->misc.TILEGX.r52 = (uc)->uc_mcontext.gregs[52];  \
-        (srP)->misc.TILEGX.r55 = (uc)->uc_mcontext.lr;         \
-      }
-
 #elif defined(VGP_x86_solaris)
 #  define VG_UCONTEXT_INSTR_PTR(uc)       ((Addr)(uc)->uc_mcontext.gregs[VKI_EIP])
 #  define VG_UCONTEXT_STACK_PTR(uc)       ((Addr)(uc)->uc_mcontext.gregs[VKI_UESP])
@@ -959,16 +944,16 @@ extern void my_sigreturn(void);
    ".text\n" \
    ".globl my_sigreturn\n" \
    "my_sigreturn:\n" \
-   "movl $" VG_STRINGIFY(__NR_DARWIN_FAKE_SIGRETURN) ",%eax\n" \
-   "int $0x80"
+   "    movl $" VG_STRINGIFY(__NR_DARWIN_FAKE_SIGRETURN) ",%eax\n" \
+   "    int $0x80\n"
 
 #elif defined(VGP_amd64_darwin)
-   // DDD: todo
 #  define _MY_SIGRETURN(name) \
    ".text\n" \
    ".globl my_sigreturn\n" \
    "my_sigreturn:\n" \
-   "ud2\n"
+   "    movq $" VG_STRINGIFY(__NR_DARWIN_FAKE_SIGRETURN) ",%rax\n" \
+   "    syscall\n"
 
 #elif defined(VGP_s390x_linux)
 #  define _MY_SIGRETURN(name) \
@@ -992,14 +977,6 @@ extern void my_sigreturn(void);
    "my_sigreturn:\n" \
    "   li $2, " #name "\n" \
    "   syscall\n" \
-   ".previous\n"
-
-#elif defined(VGP_tilegx_linux)
-#  define _MY_SIGRETURN(name) \
-   ".text\n" \
-   "my_sigreturn:\n" \
-   " moveli r10 ," #name "\n" \
-   " swint1\n" \
    ".previous\n"
 
 #elif defined(VGP_x86_solaris) || defined(VGP_amd64_solaris)
@@ -1654,8 +1631,8 @@ static Bool is_signal_from_kernel(ThreadId tid, int signum, int si_code)
 
 /* 
    Perform the default action of a signal.  If the signal is fatal, it
-   marks all threads as needing to exit, but it doesn't actually kill
-   the process or thread.
+   terminates all other threads, but it doesn't actually kill
+   the process and calling thread.
 
    If we're not being quiet, then print out some more detail about
    fatal signals (esp. core dumping signals).
@@ -1667,6 +1644,7 @@ static void default_action(const vki_siginfo_t *info, ThreadId tid)
    Bool core      = False;	/* kills process w/ core */
    struct vki_rlimit corelim;
    Bool could_core;
+   ThreadState* tst = VG_(get_ThreadState)(tid);
 
    vg_assert(VG_(is_running_thread)(tid));
    
@@ -1728,6 +1706,14 @@ static void default_action(const vki_siginfo_t *info, ThreadId tid)
    if (!terminate)
       return;			/* nothing to do */
 
+#if defined(VGO_linux)
+   if (terminate && (tst->ptrace & VKI_PT_PTRACED)
+       && (sigNo != VKI_SIGKILL)) {
+      VG_(kill)(VG_(getpid)(), VKI_SIGSTOP);
+      return;
+   }
+#endif
+
    could_core = core;
 
    if (core) {
@@ -1740,14 +1726,25 @@ static void default_action(const vki_siginfo_t *info, ThreadId tid)
 	 core = False;
    }
 
-   if ( (VG_(clo_verbosity) >= 1 ||
-         (could_core && is_signal_from_kernel(tid, sigNo, info->si_code))
-        ) &&
-        !VG_(clo_xml) ) {
-      VG_(umsg)(
-         "\n"
-         "Process terminating with default action of signal %d (%s)%s\n",
-         sigNo, VG_(signame)(sigNo), core ? ": dumping core" : "");
+   if ( VG_(clo_verbosity) >= 1 
+        || (could_core && is_signal_from_kernel(tid, sigNo, info->si_code))
+        || VG_(clo_xml) ) {
+      if (VG_(clo_xml)) {
+         VG_(printf_xml)("<fatal_signal>\n");
+         VG_(printf_xml)("  <tid>%d</tid>\n", tid);
+         if (tst->thread_name) {
+            VG_(printf_xml)("  <threadname>%s</threadname>\n",
+                            tst->thread_name);
+         }
+         VG_(printf_xml)("  <signo>%d</signo>\n", sigNo);
+         VG_(printf_xml)("  <signame>%s</signame>\n", VG_(signame)(sigNo));
+         VG_(printf_xml)("  <sicode>%d</sicode>\n", info->si_code);
+      } else {
+         VG_(umsg)(
+            "\n"
+            "Process terminating with default action of signal %d (%s)%s\n",
+            sigNo, VG_(signame)(sigNo), core ? ": dumping core" : "");
+      }
 
       /* Be helpful - decode some more details about this fault */
       if (is_signal_from_kernel(tid, sigNo, info->si_code)) {
@@ -1820,13 +1817,21 @@ static void default_action(const vki_siginfo_t *info, ThreadId tid)
 	    break;
 	 } /* switch (sigNo) */
 
-	 if (event != NULL) {
-	    if (haveaddr)
-               VG_(umsg)(" %s at address %p\n",
-                         event, info->VKI_SIGINFO_si_addr);
-	    else
-               VG_(umsg)(" %s\n", event);
-	 }
+         if (VG_(clo_xml)) {
+            if (event != NULL)
+               VG_(printf_xml)("  <event>%s</event>\n", event);
+            if (haveaddr)
+               VG_(printf_xml)("  <siaddr>%p</siaddr>\n",
+                               info->VKI_SIGINFO_si_addr);
+         } else {
+            if (event != NULL) {
+               if (haveaddr)
+                  VG_(umsg)(" %s at address %p\n",
+                            event, info->VKI_SIGINFO_si_addr);
+               else
+                  VG_(umsg)(" %s\n", event);
+            }
+         }
       }
       /* Print a stack trace.  Be cautious if the thread's SP is in an
          obviously stupid place (not mapped readable) that would
@@ -1845,8 +1850,8 @@ static void default_action(const vki_siginfo_t *info, ThreadId tid)
          if (tid == 1) {           // main thread
             Addr esp  = VG_(get_SP)(tid);
             Addr base = VG_PGROUNDDN(esp - VG_STACK_REDZONE_SZB);
-            if (VG_(am_addr_is_in_extensible_client_stack)(base) &&
-                VG_(extend_stack)(tid, base)) {
+            if (VG_(am_addr_is_in_extensible_client_stack)(base) 
+                && VG_(extend_stack)(tid, base)) {
                if (VG_(clo_trace_signals))
                   VG_(dmsg)("       -> extended stack base to %#lx\n",
                             VG_PGROUNDDN(esp));
@@ -1889,6 +1894,11 @@ static void default_action(const vki_siginfo_t *info, ThreadId tid)
                VG_(threads)[1].client_stack_szB);
          }
       }
+      if (VG_(clo_xml)) {
+         /* postamble */
+         VG_(printf_xml)("</fatal_signal>\n");
+         VG_(printf_xml)("\n");
+      }
    }
 
    if (VG_(clo_vgdb) != Vg_VgdbNo
@@ -1908,12 +1918,13 @@ static void default_action(const vki_siginfo_t *info, ThreadId tid)
       VG_(setrlimit)(VKI_RLIMIT_CORE, &zero);
    }
 
-   /* stash fatal signal in main thread */
    // what's this for?
    //VG_(threads)[VG_(master_tid)].os_state.fatalsig = sigNo;
 
-   /* everyone dies */
+   /* everyone but tid dies */
    VG_(nuke_all_threads_except)(tid, VgSrc_FatalSig);
+   VG_(reap_threads)(tid);
+   /* stash fatal signal in this thread */
    VG_(threads)[tid].exitreason = VgSrc_FatalSig;
    VG_(threads)[tid].os_state.fatalsig = sigNo;
 }
@@ -2160,7 +2171,7 @@ void VG_(synth_sigfpe)(ThreadId tid, UInt code)
    info.si_signo = VKI_SIGFPE;
    info.si_code = code;
 
-   if (VG_(gdbserver_report_signal) (VKI_SIGFPE, tid)) {
+   if (VG_(gdbserver_report_signal) (&info, tid)) {
       resume_scheduler(tid);
       deliver_signal(tid, &info, &uc);
    }
@@ -2404,8 +2415,14 @@ void async_signalhandler ( Int sigNo,
    info->si_code = sanitize_si_code(info->si_code);
 
    if (VG_(clo_trace_signals))
-      VG_(dmsg)("async signal handler: signal=%d, tid=%u, si_code=%d\n",
-                sigNo, tid, info->si_code);
+      VG_(dmsg)("async signal handler: signal=%d, tid=%u, si_code=%d, "
+                "exitreason %s\n",
+                sigNo, tid, info->si_code,
+                VG_(name_of_VgSchedReturnCode)(tst->exitreason));
+
+   /* */
+   if (tst->exitreason == VgSrc_FatalSig)
+      resume_scheduler(tid);
 
    /* Update thread state properly.  The signal can only have been
       delivered whilst we were in
@@ -2453,8 +2470,16 @@ void async_signalhandler ( Int sigNo,
    );
 
    /* (2) */
-   /* Set up the thread's state to deliver a signal */
-   if (!is_sig_ign(info, tid))
+   /* Set up the thread's state to deliver a signal.
+      However, if exitreason is VgSrc_FatalSig, then thread tid was
+      taken out of a syscall by VG_(nuke_all_threads_except).
+      But after the emission of VKI_SIGKILL, another (fatal) async
+      signal might be sent. In such a case, we must not handle this
+      signal, as the thread is supposed to die first.
+      => resume the scheduler for such a thread, so that the scheduler
+      can let the thread die. */
+   if (tst->exitreason != VgSrc_FatalSig 
+       && !is_sig_ign(info, tid))
       deliver_signal(tid, info, uc);
 
    /* It's crucial that (1) and (2) happen in the order (1) then (2)
@@ -2494,6 +2519,7 @@ void async_signalhandler ( Int sigNo,
 Bool VG_(extend_stack)(ThreadId tid, Addr addr)
 {
    SizeT udelta;
+   Addr new_stack_base;
 
    /* Get the segment containing addr. */
    const NSegment* seg = VG_(am_find_nsegment)(addr);
@@ -2511,14 +2537,15 @@ Bool VG_(extend_stack)(ThreadId tid, Addr addr)
    vg_assert(seg_next != NULL);
 
    udelta = VG_PGROUNDUP(seg_next->start - addr);
+   new_stack_base = seg_next->start - udelta;
 
    VG_(debugLog)(1, "signals", 
-                    "extending a stack base 0x%lx down by %lu\n",
-                    seg_next->start, udelta);
+                 "extending a stack base 0x%lx down by %lu"
+                 " new base 0x%lx to cover 0x%lx\n",
+                 seg_next->start, udelta, new_stack_base, addr);
    Bool overflow;
    if (! VG_(am_extend_into_adjacent_reservation_client)
        ( seg_next->start, -(SSizeT)udelta, &overflow )) {
-      Addr new_stack_base = seg_next->start - udelta;
       if (overflow)
          VG_(umsg)("Stack overflow in thread #%u: can't grow stack to %#lx\n",
                    tid, new_stack_base);
@@ -2530,7 +2557,7 @@ Bool VG_(extend_stack)(ThreadId tid, Addr addr)
 
    /* When we change the main stack, we have to let the stack handling
       code know about it. */
-   VG_(change_stack)(VG_(clstk_id), addr, VG_(clstk_end));
+   VG_(change_stack)(VG_(clstk_id), new_stack_base, VG_(clstk_end));
 
    if (VG_(clo_sanity_level) > 2)
       VG_(sanity_check_general)(False);
@@ -2538,16 +2565,13 @@ Bool VG_(extend_stack)(ThreadId tid, Addr addr)
    return True;
 }
 
-static void (*fault_catcher)(Int sig, Addr addr) = NULL;
+static fault_catcher_t fault_catcher = NULL;
 
-void VG_(set_fault_catcher)(void (*catcher)(Int, Addr))
+fault_catcher_t VG_(set_fault_catcher)(fault_catcher_t catcher)
 {
-   if (0)
-      VG_(debugLog)(0, "signals", "set fault catcher to %p\n", catcher);
-   vg_assert2(NULL == catcher || NULL == fault_catcher,
-              "Fault catcher is already registered");
-
+   fault_catcher_t prev_catcher = fault_catcher;
    fault_catcher = catcher;
+   return prev_catcher;
 }
 
 static
@@ -2686,8 +2710,8 @@ static Bool extend_stack_if_appropriate(ThreadId tid, vki_siginfo_t* info)
          then extend the stack segment. 
        */
       Addr base = VG_PGROUNDDN(esp - VG_STACK_REDZONE_SZB);
-      if (VG_(am_addr_is_in_extensible_client_stack)(base) &&
-          VG_(extend_stack)(tid, base)) {
+      if (VG_(am_addr_is_in_extensible_client_stack)(base)
+          && VG_(extend_stack)(tid, base)) {
          if (VG_(clo_trace_signals))
             VG_(dmsg)("       -> extended stack base to %#lx\n",
                       VG_PGROUNDDN(fault));
@@ -2786,11 +2810,11 @@ void sync_signalhandler ( Int sigNo,
 
    vg_assert(info != NULL);
    vg_assert(info->si_signo == sigNo);
-   vg_assert(sigNo == VKI_SIGSEGV ||
-	     sigNo == VKI_SIGBUS  ||
-	     sigNo == VKI_SIGFPE  ||
-	     sigNo == VKI_SIGILL  ||
-	     sigNo == VKI_SIGTRAP);
+   vg_assert(sigNo == VKI_SIGSEGV 
+	     || sigNo == VKI_SIGBUS
+	     || sigNo == VKI_SIGFPE
+	     || sigNo == VKI_SIGILL
+	     || sigNo == VKI_SIGTRAP);
 
    info->si_code = sanitize_si_code(info->si_code);
 
@@ -2888,7 +2912,7 @@ void pp_ksigaction ( vki_sigaction_toK_t* sa )
               );
    VG_(printf)("pp_ksigaction: { ");
    for (i = 1; i <= VG_(max_signal); i++)
-      if (VG_(sigismember(&(sa->sa_mask),i)))
+      if (VG_(sigismember)(&(sa->sa_mask),i))
          VG_(printf)("%d ", i);
    VG_(printf)("}\n");
 }
@@ -2921,6 +2945,20 @@ void VG_(poll_signals)(ThreadId tid)
    ThreadState *tst = VG_(get_ThreadState)(tid);
    vki_sigset_t saved_mask;
 
+   if (tst->exitreason == VgSrc_FatalSig) {
+      /* This task has been requested to die due to a fatal signal
+         received by the process. So, we cannot poll new signals,
+         as we are supposed to die asap. If we would poll and deliver
+         a new (maybe fatal) signal, this could cause a deadlock, as
+         this thread would believe it has to terminate the other threads
+         and wait for them to die, while we already have a thread doing
+         that. */
+      if (VG_(clo_trace_signals))
+         VG_(dmsg)("poll_signals: not polling as thread %u is exitreason %s\n",
+                   tid, VG_(name_of_VgSchedReturnCode)(tst->exitreason));
+      return;
+   }
+
    /* look for all the signals this thread isn't blocking */
    /* pollset = ~tst->sig_mask */
    VG_(sigcomplementset)( &pollset, &tst->sig_mask );
@@ -2936,15 +2974,18 @@ void VG_(poll_signals)(ThreadId tid)
    /* If there was nothing queued, ask the kernel for a pending signal */
    if (sip == NULL && VG_(sigtimedwait_zero)(&pollset, &si) > 0) {
       if (VG_(clo_trace_signals))
-         VG_(dmsg)("poll_signals: got signal %d for thread %u\n",
-                   si.si_signo, tid);
+         VG_(dmsg)("poll_signals: got signal %d for thread %u exitreason %s\n",
+                   si.si_signo, tid,
+                   VG_(name_of_VgSchedReturnCode)(tst->exitreason));
       sip = &si;
    }
 
    if (sip != NULL) {
       /* OK, something to do; deliver it */
       if (VG_(clo_trace_signals))
-         VG_(dmsg)("Polling found signal %d for tid %u\n", sip->si_signo, tid);
+         VG_(dmsg)("Polling found signal %d for tid %u exitreason %s\n",
+                   sip->si_signo, tid,
+                   VG_(name_of_VgSchedReturnCode)(tst->exitreason));
       if (!is_sig_ign(sip, tid))
 	 deliver_signal(tid, sip, NULL);
       else if (VG_(clo_trace_signals))
@@ -3048,7 +3089,8 @@ void VG_(sigstartup_actions) ( void )
    }
 
    if (VG_(clo_trace_signals))
-      VG_(dmsg)("Max kernel-supported signal is %d\n", VG_(max_signal));
+      VG_(dmsg)("Max kernel-supported signal is %d, VG_SIGVGKILL is %d\n",
+                VG_(max_signal), VG_SIGVGKILL);
 
    /* Our private internal signals are treated as ignored */
    scss.scss_per_sig[VG_SIGVGKILL].scss_handler = VKI_SIG_IGN;

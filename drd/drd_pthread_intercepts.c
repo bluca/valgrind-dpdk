@@ -5,7 +5,7 @@
 /*
   This file is part of DRD, a thread error detector.
 
-  Copyright (C) 2006-2015 Bart Van Assche <bvanassche@acm.org>.
+  Copyright (C) 2006-2017 Bart Van Assche <bvanassche@acm.org>.
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License as
@@ -55,13 +55,6 @@
 #include <stdlib.h>         /* malloc(), free() */
 #include <unistd.h>         /* confstr() */
 #include "config.h"         /* HAVE_PTHREAD_MUTEX_ADAPTIVE_NP etc. */
-#ifdef HAVE_USABLE_LINUX_FUTEX_H
-#include <asm/unistd.h>     /* __NR_futex */
-#include <linux/futex.h>    /* FUTEX_WAIT */
-#ifndef FUTEX_PRIVATE_FLAG
-#define FUTEX_PRIVATE_FLAG 0
-#endif
-#endif
 #include "drd_basics.h"     /* DRD_() */
 #include "drd_clientreq.h"
 #include "pub_tool_redir.h" /* VG_WRAP_FUNCTION_ZZ() */
@@ -218,8 +211,8 @@ static int never_true;
 
 typedef struct {
    pthread_mutex_t mutex;
+   pthread_cond_t cond;
    int counter;
-   int waiters;
 } DrdSema;
 
 typedef struct
@@ -235,7 +228,7 @@ typedef struct
 
 static void DRD_(init)(void) __attribute__((constructor));
 static void DRD_(check_threading_library)(void);
-static void DRD_(set_main_thread_state)(void);
+static void DRD_(set_pthread_id)(void);
 static void DRD_(sema_init)(DrdSema* sema);
 static void DRD_(sema_destroy)(DrdSema* sema);
 static void DRD_(sema_down)(DrdSema* sema);
@@ -257,7 +250,7 @@ static void DRD_(sema_up)(DrdSema* sema);
 static void DRD_(init)(void)
 {
    DRD_(check_threading_library)();
-   DRD_(set_main_thread_state)();
+   DRD_(set_pthread_id)();
 #if defined(VGO_solaris)
    if ((DRD_(rtld_bind_guard) == NULL) || (DRD_(rtld_bind_clear) == NULL)) {
       fprintf(stderr,
@@ -272,7 +265,7 @@ static void DRD_(init)(void)
 static __always_inline void DRD_(ignore_mutex_ordering)(pthread_mutex_t *mutex)
 {
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_IGNORE_MUTEX_ORDERING,
-                                   mutex, 0, 0, 0, 0, 0);
+                                   mutex, 0, 0, 0, 0);
 }
 
 static void DRD_(sema_init)(DrdSema* sema)
@@ -280,43 +273,21 @@ static void DRD_(sema_init)(DrdSema* sema)
    DRD_IGNORE_VAR(*sema);
    pthread_mutex_init(&sema->mutex, NULL);
    DRD_(ignore_mutex_ordering)(&sema->mutex);
+   pthread_cond_init(&sema->cond, NULL);
    sema->counter = 0;
-   sema->waiters = 0;
 }
 
 static void DRD_(sema_destroy)(DrdSema* sema)
 {
    pthread_mutex_destroy(&sema->mutex);
+   pthread_cond_destroy(&sema->cond);
 }
 
 static void DRD_(sema_down)(DrdSema* sema)
 {
-   int res = ENOSYS;
-
    pthread_mutex_lock(&sema->mutex);
-   if (sema->counter == 0) {
-      sema->waiters++;
-      while (sema->counter == 0) {
-         pthread_mutex_unlock(&sema->mutex);
-#ifdef HAVE_USABLE_LINUX_FUTEX_H
-         if (syscall(__NR_futex, (UWord)&sema->counter,
-                     FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 0) == 0)
-            res = 0;
-         else
-            res = errno;
-#endif
-         /*
-          * Invoke sched_yield() on non-Linux systems, if the futex syscall has
-          * not been invoked or if this code has been built on a Linux system
-          * where __NR_futex is defined and is run on a Linux system that does
-          * not support the futex syscall.
-          */
-         if (res != 0 && res != EWOULDBLOCK)
-            sched_yield();
-         pthread_mutex_lock(&sema->mutex);
-      }
-      sema->waiters--;
-   }
+   while (sema->counter == 0)
+      pthread_cond_wait(&sema->cond, &sema->mutex);
    sema->counter--;
    pthread_mutex_unlock(&sema->mutex);
 }
@@ -325,11 +296,7 @@ static void DRD_(sema_up)(DrdSema* sema)
 {
    pthread_mutex_lock(&sema->mutex);
    sema->counter++;
-#ifdef HAVE_USABLE_LINUX_FUTEX_H
-   if (sema->waiters > 0)
-      syscall(__NR_futex, (UWord)&sema->counter,
-              FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1);
-#endif
+   pthread_cond_signal(&sema->cond);
    pthread_mutex_unlock(&sema->mutex);
 }
 
@@ -432,21 +399,21 @@ static void DRD_(set_joinable)(const pthread_t tid, const int joinable)
 {
    assert(joinable == 0 || joinable == 1);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__SET_JOINABLE,
-                                   tid, joinable, 0, 0, 0, 0);
+                                   tid, joinable, 0, 0, 0);
 }
 
 /** Tell DRD that the calling thread is about to enter pthread_create(). */
 static __always_inline void DRD_(entering_pthread_create)(void)
 {
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__ENTERING_PTHREAD_CREATE,
-                                   0, 0, 0, 0, 0, 0);
+                                   0, 0, 0, 0, 0);
 }
 
 /** Tell DRD that the calling thread has left pthread_create(). */
 static __always_inline void DRD_(left_pthread_create)(void)
 {
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__LEFT_PTHREAD_CREATE,
-                                   0, 0, 0, 0, 0, 0);
+                                   0, 0, 0, 0, 0);
 }
 
 /**
@@ -462,7 +429,7 @@ static void* DRD_(thread_wrapper)(void* arg)
    arg_copy = *arg_ptr;
 
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__SET_PTHREADID,
-                                   pthread_self(), 0, 0, 0, 0, 0);
+                                   pthread_self(), 0, 0, 0, 0);
 
    DRD_(set_joinable)(pthread_self(),
                       arg_copy.detachstate == PTHREAD_CREATE_JOINABLE);
@@ -534,14 +501,12 @@ static void DRD_(check_threading_library)(void)
 }
 
 /**
- * The main thread is the only thread not created by pthread_create().
- * Update DRD's state information about the main thread.
+ * Update DRD's state information about the current thread.
  */
-static void DRD_(set_main_thread_state)(void)
+static void DRD_(set_pthread_id)(void)
 {
-   // Make sure that DRD knows about the main thread's POSIX thread ID.
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__SET_PTHREADID,
-                                   pthread_self(), 0, 0, 0, 0, 0);
+                                   pthread_self(), 0, 0, 0, 0);
 }
 
 /*
@@ -591,6 +556,14 @@ int pthread_create_intercept(pthread_t* thread, const pthread_attr_t* attr,
    assert(thread_args.detachstate == PTHREAD_CREATE_JOINABLE
           || thread_args.detachstate == PTHREAD_CREATE_DETACHED);
 
+   /*
+    * The DRD_(set_pthread_id)() from DRD_(init)() may encounter that
+    * pthread_self() == 0, e.g. when the main program is not linked with the
+    * pthread library and when a pthread_create() call occurs from within a
+    * shared library. Hence call DRD_(set_pthread_id)() again to ensure that
+    * DRD knows the identity of the current thread. See also B.Z. 356374.
+    */
+   DRD_(set_pthread_id)();
    DRD_(entering_pthread_create)();
    CALL_FN_W_WWWW(ret, fn, thread, attr, DRD_(thread_wrapper), &thread_args);
    DRD_(left_pthread_create)();
@@ -603,7 +576,7 @@ int pthread_create_intercept(pthread_t* thread, const pthread_attr_t* attr,
    DRD_(sema_destroy)(&wrapper_started);
 
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_START_NEW_SEGMENT,
-                                   pthread_self(), 0, 0, 0, 0, 0);
+                                   pthread_self(), 0, 0, 0, 0);
 
    return ret;
 }
@@ -655,7 +628,7 @@ int thr_create_intercept(void *stk, size_t stksize, void *(*start)(void *),
    DRD_(sema_destroy)(&wrapper_started);
 
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__DRD_START_NEW_SEGMENT,
-                                   pthread_self(), 0, 0, 0, 0, 0);
+                                   pthread_self(), 0, 0, 0, 0);
 
    return ret;
 }
@@ -675,7 +648,7 @@ PTH_FUNCS(int, thrZucreate, thr_create_intercept,
 static __always_inline
 int DRD_(_ti_bind_guard_intercept)(int flags) {
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__RTLD_BIND_GUARD,
-                                   flags, 0, 0, 0, 0, 0);
+                                   flags, 0, 0, 0, 0);
    return DRD_(rtld_bind_guard)(flags);
 }
 
@@ -683,7 +656,7 @@ static __always_inline
 int DRD_(_ti_bind_clear_intercept)(int flags) {
    int ret = DRD_(rtld_bind_clear)(flags);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__RTLD_BIND_CLEAR,
-                                   flags, 0, 0, 0, 0, 0);
+                                   flags, 0, 0, 0, 0);
    return ret;
 }
 
@@ -736,7 +709,7 @@ int pthread_join_intercept(pthread_t pt_joinee, void **thread_return)
    if (ret == 0)
    {
       VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_THREAD_JOIN,
-                                      pt_joinee, 0, 0, 0, 0, 0);
+                                      pt_joinee, 0, 0, 0, 0);
    }
    ANNOTATE_IGNORE_READS_AND_WRITES_END();
    return ret;
@@ -764,7 +737,7 @@ int thr_join_intercept(thread_t joinee, thread_t *departed, void **thread_return
    if (ret == 0)
    {
       VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_THREAD_JOIN,
-                                      joinee, 0, 0, 0, 0, 0);
+                                      joinee, 0, 0, 0, 0);
    }
    return ret;
 }
@@ -800,10 +773,10 @@ int pthread_cancel_intercept(pthread_t pt_thread)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_THREAD_CANCEL,
-                                   pt_thread, 0, 0, 0, 0, 0);
+                                   pt_thread, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, pt_thread);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_THREAD_CANCEL,
-                                   pt_thread, ret==0, 0, 0, 0, 0);
+                                   pt_thread, ret==0, 0, 0, 0);
    return ret;
 }
 
@@ -847,10 +820,10 @@ int pthread_mutex_init_intercept(pthread_mutex_t *mutex,
       pthread_mutexattr_gettype(attr, &mt);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_INIT,
                                    mutex, DRD_(pthread_to_drd_mutex_type)(mt),
-                                   0, 0, 0, 0);
+                                   0, 0, 0);
    CALL_FN_W_WW(ret, fn, mutex, attr);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_INIT,
-                                   mutex, 0, 0, 0, 0, 0);
+                                   mutex, 0, 0, 0, 0);
    return ret;
 }
 
@@ -868,10 +841,10 @@ int mutex_init_intercept(mutex_t *mutex, int type, void *arg)
 
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_INIT,
                                    mutex, DRD_(thread_to_drd_mutex_type)(type),
-                                   0, 0, 0, 0);
+                                   0, 0, 0);
    CALL_FN_W_WWW(ret, fn, mutex, type, arg);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_INIT,
-                                   mutex, 0, 0, 0, 0, 0);
+                                   mutex, 0, 0, 0, 0);
    return ret;
 }
 
@@ -887,10 +860,10 @@ int pthread_mutex_destroy_intercept(pthread_mutex_t* mutex)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_DESTROY,
-                                   mutex, 0, 0, 0, 0, 0);
+                                   mutex, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, mutex);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_DESTROY,
-                                   mutex, DRD_(mutex_type)(mutex), 0, 0, 0, 0);
+                                   mutex, DRD_(mutex_type)(mutex), 0, 0, 0);
    return ret;
 }
 
@@ -910,10 +883,10 @@ int pthread_mutex_lock_intercept(pthread_mutex_t* mutex)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_LOCK,
-                                   mutex, DRD_(mutex_type)(mutex), 0, 0, 0, 0);
+                                   mutex, DRD_(mutex_type)(mutex), 0, 0, 0);
    CALL_FN_W_W(ret, fn, mutex);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_LOCK,
-                                   mutex, ret == 0, 0, 0, 0, 0);
+                                   mutex, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -938,10 +911,10 @@ void lmutex_lock_intercept(mutex_t *mutex)
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_LOCK,
                                    mutex,
                                    DRD_(mutex_type)((pthread_mutex_t *) mutex),
-                                   False /* try_lock */, 0, 0, 0);
+                                   False /* try_lock */, 0, 0);
    CALL_FN_v_W(fn, mutex);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_LOCK,
-                                   mutex, True /* took_lock */, 0, 0, 0, 0);
+                                   mutex, True /* took_lock */, 0, 0, 0);
 }
 
 PTH_FUNCS(void, lmutexZulock, lmutex_lock_intercept,
@@ -955,10 +928,10 @@ int pthread_mutex_trylock_intercept(pthread_mutex_t* mutex)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_LOCK,
-                                   mutex, DRD_(mutex_type)(mutex), 1, 0, 0, 0);
+                                   mutex, DRD_(mutex_type)(mutex), 1, 0, 0);
    CALL_FN_W_W(ret, fn, mutex);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_LOCK,
-                                   mutex, ret == 0, 0, 0, 0, 0);
+                                   mutex, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -979,10 +952,10 @@ int pthread_mutex_timedlock_intercept(pthread_mutex_t *mutex,
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_LOCK,
-                                   mutex, DRD_(mutex_type)(mutex), 0, 0, 0, 0);
+                                   mutex, DRD_(mutex_type)(mutex), 0, 0, 0);
    CALL_FN_W_WW(ret, fn, mutex, abs_timeout);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_LOCK,
-                                   mutex, ret == 0, 0, 0, 0, 0);
+                                   mutex, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1003,10 +976,10 @@ int pthread_mutex_unlock_intercept(pthread_mutex_t *mutex)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_UNLOCK,
-                                   mutex, DRD_(mutex_type)(mutex), 0, 0, 0, 0);
+                                   mutex, DRD_(mutex_type)(mutex), 0, 0, 0);
    CALL_FN_W_W(ret, fn, mutex);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_UNLOCK,
-                                   mutex, 0, 0, 0, 0, 0);
+                                   mutex, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1029,10 +1002,10 @@ void lmutex_unlock_intercept(mutex_t *mutex)
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_UNLOCK,
                                    mutex,
                                    DRD_(mutex_type)((pthread_mutex_t *) mutex),
-                                   0, 0, 0, 0);
+                                   0, 0, 0);
    CALL_FN_v_W(fn, mutex);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_UNLOCK,
-                                   mutex, 0, 0, 0, 0, 0);
+                                   mutex, 0, 0, 0, 0);
 }
 
 PTH_FUNCS(void, lmutexZuunlock, lmutex_unlock_intercept,
@@ -1047,10 +1020,10 @@ int pthread_cond_init_intercept(pthread_cond_t* cond,
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_COND_INIT,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    CALL_FN_W_WW(ret, fn, cond, attr);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_COND_INIT,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1066,10 +1039,10 @@ int cond_init_intercept(cond_t *cond, int type, void *arg)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_COND_INIT,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    CALL_FN_W_WWW(ret, fn, cond, type, arg);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_COND_INIT,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1085,10 +1058,10 @@ int pthread_cond_destroy_intercept(pthread_cond_t* cond)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_COND_DESTROY,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, cond);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_COND_DESTROY,
-                                   cond, ret==0, 0, 0, 0, 0);
+                                   cond, ret==0, 0, 0, 0);
    return ret;
 }
 
@@ -1108,11 +1081,10 @@ int pthread_cond_wait_intercept(pthread_cond_t *cond, pthread_mutex_t *mutex)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_COND_WAIT,
-                                   cond, mutex, DRD_(mutex_type)(mutex), 0, 0,
-                                   0);
+                                   cond, mutex, DRD_(mutex_type)(mutex), 0, 0);
    CALL_FN_W_WW(ret, fn, cond, mutex);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_COND_WAIT,
-                                   cond, mutex, 1, 0, 0, 0);
+                                   cond, mutex, 1, 0, 0);
    return ret;
 }
 
@@ -1134,11 +1106,10 @@ int pthread_cond_timedwait_intercept(pthread_cond_t *cond,
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_COND_WAIT,
-                                   cond, mutex, DRD_(mutex_type)(mutex), 0, 0,
-                                   0);
+                                   cond, mutex, DRD_(mutex_type)(mutex), 0, 0);
    CALL_FN_W_WWW(ret, fn, cond, mutex, abstime);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_COND_WAIT,
-                                   cond, mutex, 1, 0, 0, 0);
+                                   cond, mutex, 1, 0, 0);
    return ret;
 }
 
@@ -1170,10 +1141,10 @@ int pthread_cond_signal_intercept(pthread_cond_t* cond)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_COND_SIGNAL,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, cond);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_COND_SIGNAL,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1193,10 +1164,10 @@ int pthread_cond_broadcast_intercept(pthread_cond_t* cond)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_COND_BROADCAST,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, cond);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_COND_BROADCAST,
-                                   cond, 0, 0, 0, 0, 0);
+                                   cond, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1218,10 +1189,10 @@ int pthread_spin_init_intercept(pthread_spinlock_t *spinlock, int pshared)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SPIN_INIT_OR_UNLOCK,
-                                   spinlock, 0, 0, 0, 0, 0);
+                                   spinlock, 0, 0, 0, 0);
    CALL_FN_W_WW(ret, fn, spinlock, pshared);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SPIN_INIT_OR_UNLOCK,
-                                   spinlock, 0, 0, 0, 0, 0);
+                                   spinlock, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1235,10 +1206,10 @@ int pthread_spin_destroy_intercept(pthread_spinlock_t *spinlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_DESTROY,
-                                   spinlock, 0, 0, 0, 0, 0);
+                                   spinlock, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, spinlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_DESTROY,
-                                   spinlock, mutex_type_spinlock, 0, 0, 0, 0);
+                                   spinlock, mutex_type_spinlock, 0, 0, 0);
    return ret;
 }
 
@@ -1252,10 +1223,10 @@ int pthread_spin_lock_intercept(pthread_spinlock_t *spinlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_LOCK,
-                                   spinlock, mutex_type_spinlock, 0, 0, 0, 0);
+                                   spinlock, mutex_type_spinlock, 0, 0, 0);
    CALL_FN_W_W(ret, fn, spinlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_LOCK,
-                                   spinlock, ret == 0, 0, 0, 0, 0);
+                                   spinlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1269,10 +1240,10 @@ int pthread_spin_trylock_intercept(pthread_spinlock_t *spinlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_MUTEX_LOCK,
-                                   spinlock, mutex_type_spinlock, 0, 0, 0, 0);
+                                   spinlock, mutex_type_spinlock, 0, 0, 0);
    CALL_FN_W_W(ret, fn, spinlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_MUTEX_LOCK,
-                                   spinlock, ret == 0, 0, 0, 0, 0);
+                                   spinlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1286,10 +1257,10 @@ int pthread_spin_unlock_intercept(pthread_spinlock_t *spinlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SPIN_INIT_OR_UNLOCK,
-                                   spinlock, mutex_type_spinlock, 0, 0, 0, 0);
+                                   spinlock, mutex_type_spinlock, 0, 0, 0);
    CALL_FN_W_W(ret, fn, spinlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SPIN_INIT_OR_UNLOCK,
-                                   spinlock, 0, 0, 0, 0, 0);
+                                   spinlock, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1308,10 +1279,10 @@ int pthread_barrier_init_intercept(pthread_barrier_t* barrier,
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_BARRIER_INIT,
-                                   barrier, pthread_barrier, count, 0, 0, 0);
+                                   barrier, pthread_barrier, count, 0, 0);
    CALL_FN_W_WWW(ret, fn, barrier, attr, count);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_BARRIER_INIT,
-                                   barrier, pthread_barrier, 0, 0, 0, 0);
+                                   barrier, pthread_barrier, 0, 0, 0);
    return ret;
 }
 
@@ -1326,10 +1297,10 @@ int pthread_barrier_destroy_intercept(pthread_barrier_t* barrier)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_BARRIER_DESTROY,
-                                   barrier, pthread_barrier, 0, 0, 0, 0);
+                                   barrier, pthread_barrier, 0, 0, 0);
    CALL_FN_W_W(ret, fn, barrier);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_BARRIER_DESTROY,
-                                   barrier, pthread_barrier, 0, 0, 0, 0);
+                                   barrier, pthread_barrier, 0, 0, 0);
    return ret;
 }
 
@@ -1343,12 +1314,12 @@ int pthread_barrier_wait_intercept(pthread_barrier_t* barrier)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_BARRIER_WAIT,
-                                   barrier, pthread_barrier, 0, 0, 0, 0);
+                                   barrier, pthread_barrier, 0, 0, 0);
    CALL_FN_W_W(ret, fn, barrier);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_BARRIER_WAIT,
                               barrier, pthread_barrier,
                               ret == 0 || ret == PTHREAD_BARRIER_SERIAL_THREAD,
-                              ret == PTHREAD_BARRIER_SERIAL_THREAD, 0, 0);
+                              ret == PTHREAD_BARRIER_SERIAL_THREAD, 0);
    return ret;
 }
 
@@ -1364,10 +1335,10 @@ int sem_init_intercept(sem_t *sem, int pshared, unsigned int value)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_INIT,
-                                   sem, pshared, value, 0, 0, 0);
+                                   sem, pshared, value, 0, 0);
    CALL_FN_W_WWW(ret, fn, sem, pshared, value);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_INIT,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1383,10 +1354,10 @@ int sema_init_intercept(sema_t *sem, unsigned int value, int type, void *arg)
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_INIT,
                                    sem, type == USYNC_PROCESS ? 1 : 0,
-                                   value, 0, 0, 0);
+                                   value, 0, 0);
    CALL_FN_W_WWWW(ret, fn, sem, value, type, arg);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_INIT,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1402,10 +1373,10 @@ int sem_destroy_intercept(sem_t *sem)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_DESTROY,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, sem);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_DESTROY,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1422,11 +1393,11 @@ sem_t* sem_open_intercept(const char *name, int oflag, mode_t mode,
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_OPEN,
-                                   name, oflag, mode, value, 0, 0);
+                                   name, oflag, mode, value, 0);
    CALL_FN_W_WWWW(ret, fn, name, oflag, mode, value);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_OPEN,
                                    ret != SEM_FAILED ? ret : 0,
-                                   name, oflag, mode, value, 0);
+                                   name, oflag, mode, value);
    return ret;
 }
 
@@ -1440,10 +1411,10 @@ static __always_inline int sem_close_intercept(sem_t *sem)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_CLOSE,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, sem);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_CLOSE,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1455,10 +1426,10 @@ static __always_inline int sem_wait_intercept(sem_t *sem)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_WAIT,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, sem);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_WAIT,
-                                   sem, ret == 0, 0, 0, 0, 0);
+                                   sem, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1473,10 +1444,10 @@ static __always_inline int sem_trywait_intercept(sem_t *sem)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_WAIT,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, sem);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_WAIT,
-                                   sem, ret == 0, 0, 0, 0, 0);
+                                   sem, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1492,10 +1463,10 @@ int sem_timedwait_intercept(sem_t *sem, const struct timespec *abs_timeout)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_WAIT,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    CALL_FN_W_WW(ret, fn, sem, abs_timeout);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_WAIT,
-                                   sem, ret == 0, 0, 0, 0, 0);
+                                   sem, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1517,10 +1488,10 @@ static __always_inline int sem_post_intercept(sem_t *sem)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_SEM_POST,
-                                   sem, 0, 0, 0, 0, 0);
+                                   sem, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, sem);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_SEM_POST,
-                                   sem, ret == 0, 0, 0, 0, 0);
+                                   sem, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1541,10 +1512,10 @@ int pthread_rwlock_init_intercept(pthread_rwlock_t* rwlock,
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_INIT,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_WW(ret, fn, rwlock, attr);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_INIT,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1561,10 +1532,10 @@ int rwlock_init_intercept(rwlock_t *rwlock, int type, void *arg)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_INIT,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_WWW(ret, fn, rwlock, type, arg);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_INIT,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1580,10 +1551,10 @@ int pthread_rwlock_destroy_intercept(pthread_rwlock_t* rwlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_DESTROY,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, rwlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_DESTROY,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    return ret;
 }
 
@@ -1605,10 +1576,10 @@ int pthread_rwlock_rdlock_intercept(pthread_rwlock_t* rwlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_RDLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, rwlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_RDLOCK,
-                                   rwlock, ret == 0, 0, 0, 0, 0);
+                                   rwlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1631,10 +1602,10 @@ void lrw_rdlock_intercept(rwlock_t *rwlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_RDLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_v_W(fn, rwlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_RDLOCK,
-                                   rwlock, True /* took_lock */, 0, 0, 0, 0);
+                                   rwlock, True /* took_lock */, 0, 0, 0);
 }
 
 PTH_FUNCS(void, lrwZurdlock, lrw_rdlock_intercept,
@@ -1648,10 +1619,10 @@ int pthread_rwlock_wrlock_intercept(pthread_rwlock_t* rwlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_WRLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, rwlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_WRLOCK,
-                                   rwlock, ret == 0, 0, 0, 0, 0);
+                                   rwlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1674,10 +1645,10 @@ void lrw_wrlock_intercept(rwlock_t *rwlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_WRLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_v_W(fn, rwlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_WRLOCK,
-                                   rwlock, True /* took_lock */, 0, 0, 0, 0);
+                                   rwlock, True /* took_lock */, 0, 0, 0);
 }
 
 PTH_FUNCS(void, lrwZuwrlock, lrw_wrlock_intercept,
@@ -1692,10 +1663,10 @@ int pthread_rwlock_timedrdlock_intercept(pthread_rwlock_t* rwlock,
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_RDLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_WW(ret, fn, rwlock, timeout);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_RDLOCK,
-                                   rwlock, ret == 0, 0, 0, 0, 0);
+                                   rwlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1718,10 +1689,10 @@ int pthread_rwlock_timedwrlock_intercept(pthread_rwlock_t* rwlock,
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_WRLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_WW(ret, fn, rwlock, timeout);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_WRLOCK,
-                                   rwlock, ret == 0, 0, 0, 0, 0);
+                                   rwlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1743,10 +1714,10 @@ int pthread_rwlock_tryrdlock_intercept(pthread_rwlock_t* rwlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_RDLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, rwlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_RDLOCK,
-                                   rwlock, ret == 0, 0, 0, 0, 0);
+                                   rwlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1768,10 +1739,10 @@ int pthread_rwlock_trywrlock_intercept(pthread_rwlock_t* rwlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_WRLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, rwlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_WRLOCK,
-                                   rwlock, ret == 0, 0, 0, 0, 0);
+                                   rwlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
@@ -1793,10 +1764,10 @@ int pthread_rwlock_unlock_intercept(pthread_rwlock_t* rwlock)
    OrigFn fn;
    VALGRIND_GET_ORIG_FN(fn);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__PRE_RWLOCK_UNLOCK,
-                                   rwlock, 0, 0, 0, 0, 0);
+                                   rwlock, 0, 0, 0, 0);
    CALL_FN_W_W(ret, fn, rwlock);
    VALGRIND_DO_CLIENT_REQUEST_STMT(VG_USERREQ__POST_RWLOCK_UNLOCK,
-                                   rwlock, ret == 0, 0, 0, 0, 0);
+                                   rwlock, ret == 0, 0, 0, 0);
    return ret;
 }
 
